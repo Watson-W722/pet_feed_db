@@ -40,7 +40,6 @@ CATEGORY_MAP = {
     "med": "藥品",
     "other": "其他"
 }
-# [修正] item() -> items()
 CATEGORY_REVERSE = {v: k for k, v in CATEGORY_MAP.items()}
 
 # 定義哪些類別屬於「食物」（計算密度與重量用）
@@ -72,12 +71,9 @@ supabase = init_supabase()
 def pil_image_to_base64(image):
     """將 PIL 圖片物件轉為 Base64 字串 (給裁切器用)"""
     try:
-        # 統一縮小到 300x300 以內 (節省資料庫空間)
         image.thumbnail((300, 300))
         buffered = io.BytesIO()
-        # 轉成 JPEG
         image.save(buffered, format="JPEG", quality=80)
-        # [修正] b64decode -> b64encode (我們要編碼存進去，不是解碼)
         return base64.b64encode(buffered.getvalue()).decode()
     except Exception as e:
         st.error(f"圖片轉碼失敗: {e}")
@@ -93,10 +89,8 @@ def fetch_pets():
 
 def save_pet(data_dict, pet_id=None):
     if pet_id:
-        # [修正] 更新舊資料要用 update
         supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
     else:
-        # 新增資料用 insert
         supabase.table('pets').insert(data_dict).execute()
     st.cache_data.clear()
 
@@ -114,10 +108,8 @@ def calculate_age(birth_date_str):
         return "格式錯誤"
 
 # --- 食物與點餐本相關 ---
-# [修正] 補上冒號
 def add_new_food_to_library_and_menu(food_data, pet_id):
     try:
-        # [修正] food_iibrary -> food_library
         res = supabase.table('food_library').insert(food_data).execute()
         if res.data:
             new_food_id = res.data[0]['id']
@@ -131,7 +123,6 @@ def add_new_food_to_library_and_menu(food_data, pet_id):
         return False
 
 def fetch_pet_menu(pet_id):
-    # [修正] 補上冒號
     try:
         response = supabase.table('pet_food_relations')\
             .select("food_id, food_library(id, name, brand, category, calories_100g, unit_type, protein_pct, fat_pct, phos_pct, fiber_pct, ash_pct, moisture_pct)")\
@@ -143,7 +134,6 @@ def fetch_pet_menu(pet_id):
         for item in response.data:
             if item['food_library']:
                 flat_item = item['food_library']
-                # [修正] 賦值邏輯修正
                 flat_item['relation_food_id'] = item['food_id'] 
                 data.append(flat_item)
         return pd.DataFrame(data)
@@ -160,7 +150,6 @@ def save_log_entry(entries):
         st.error(f"儲存紀錄失敗: {e}")
         return False
 
-# [修正] data_str -> date_str
 def fetch_daily_logs(pet_id, date_str):
     try:
         start = f"{date_str} 00:00:00"
@@ -175,7 +164,6 @@ def fetch_daily_logs(pet_id, date_str):
     except:
         return pd.DataFrame()
 
-# [修正] ped_id -> pet_id
 def fetch_all_logs_for_export(pet_id):
     try:
         resp = supabase.table('diet_logs').select("*").eq('pet_id', pet_id).order('timestamp', desc=True).execute()
@@ -203,7 +191,6 @@ def get_last_meal_density(pet_id):
         if not logs: return None
 
         # 2. 找到「最近一餐」的 meal_name 和 date_str
-        # 邏輯：找到第一筆 net_weight > 0 的紀錄，視為最近一餐的標記
         target_meal = None
         target_date = None
 
@@ -214,15 +201,18 @@ def get_last_meal_density(pet_id):
                 break
 
         if not target_meal: return None
+        
         # 3. 為了精準排除非食物，我們需要再去撈 food_library 確認類別
-        # 先把這餐的 food_name 都抓出來
-        this_meal_logs = [l for l in logs if l['meal_name']] == target_meal and 1['date_str'] == target_date
-        food_names = [1['food_name']for l in this_meal_logs]
+        # [修正] 括號位置修正 & 變數修正 (原本寫成 if l['meal_name']] 和 1['date_str'])
+        this_meal_logs = [l for l in logs if l['meal_name'] == target_meal and l['date_str'] == target_date]
+        
+        # [修正] 變數修正 (原本寫成 1['food_name'])
+        food_names = [l['food_name'] for l in this_meal_logs]
 
         lib_res = supabase.table('food_library').select('name, category').in_('name', food_names).execute()
         food_cat_map = {item['name']: item['category'] for item in lib_res.data}
 
-        # 4. 加總該餐的營養素 (只計算食物類別
+        # 4. 加總該餐的營養素 (只計算食物類別)
         total_weight = 0.0
         total_cal = 0.0
         total_prot = 0.0
@@ -239,16 +229,18 @@ def get_last_meal_density(pet_id):
                 total_fat += entry['fat']
                 total_phos += entry['phos'] or 0
             
-            if total_weight <= 0: return None
+        # [修正] 縮排修正：此判斷應在迴圈結束後
+        if total_weight <= 0: return None
 
-            # 5. 回傳密度與資訊
-            return{
-                "density_cal": total_cal / total_weight,
-                "density_prot": total_prot / total_weight,
-                "density_fat": total_fat / total_weight,
-                "density_phos": total_phos / total_weight,
-                "info": f"{(target_date) {target_meal}}"
-            }
+        # 5. 回傳密度與資訊
+        # [修正] 這裡原本的 f-string 括號寫錯 {(target_date)...}，應為 {target_date}
+        return {
+            "density_cal": total_cal / total_weight,
+            "density_prot": total_prot / total_weight,
+            "density_fat": total_fat / total_weight,
+            "density_phos": total_phos / total_weight,
+            "info": f"{target_date} {target_meal}"
+        }
     except Exception as e:
         print(f"Density calc error: {e}")
         return None
@@ -284,7 +276,6 @@ def render_sidebar():
                 st.sidebar.image(img_src, width=150, caption=selected_pet_name)
             except: pass
         
-        # [修正] birth_data -> birth_date
         age_str = calculate_age(current_pet_data.get('birth_date'))
         tags = current_pet_data.get('health_tags') or []
         desc = current_pet_data.get('health_desc') or ""
@@ -292,7 +283,6 @@ def render_sidebar():
         if desc: status_text += f"({desc})"
         if not status_text: status_text = "未設定"
 
-        # [修正] bread -> breed
         st.sidebar.markdown(f"""
         ### {selected_pet_name}
         - 🎂 **年齡**: {age_str}
@@ -304,7 +294,6 @@ def render_sidebar():
         st.sidebar.divider()
 
     # --- 編輯/新增寵物表單 ---
-    # [修正] expander 括號
     with st.sidebar.expander(f"{'新增' if selected_pet_name == '➕ 新增寵物' else '編輯'} 資料"):
         with st.form("pet_form"):
             p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
@@ -317,7 +306,6 @@ def render_sidebar():
 
             p_bday = st.date_input("生日", value=default_date)
             p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
-            # [修正] bread -> breed
             p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
             p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
 
@@ -330,7 +318,6 @@ def render_sidebar():
             # === 圖片裁切區 ===
             st.markdown("---")
             st.write("📷 上傳與裁切大頭照")
-            # [修正] type 格式列表
             p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'])
 
             cropped_img_base64 = None
@@ -346,7 +333,6 @@ def render_sidebar():
 
             if st.form_submit_button("💾 儲存設定"):
                 final_img_str = current_pet_data.get('image_data') 
-                # [修正] ropped -> cropped
                 if p_img_file and cropped_img_base64: 
                     final_img_str = cropped_img_base64
 
@@ -378,7 +364,6 @@ def render_sidebar():
 def main():
     if not supabase:
         st.error("無法連線到資料庫，請檢查 secrets.toml 設定。")
-        # [修正] 加上括號
         st.stop()
 
     current_pet = render_sidebar()
@@ -386,7 +371,6 @@ def main():
     if not current_pet:
         st.info("👈 請先在側邊欄新增寵物資料，才能開始使用喔！")
         st.title("🐱 歡迎使用寵物飲食紀錄")
-        # st.write("這是您的個人資料庫版本，資料將永久保存在雲端。請依照左側指示建立第一位主子。")
         st.stop()
     
     pet_id = current_pet['id']
@@ -421,13 +405,12 @@ def main():
                 df_merged = pd.merge(df_logs, df_lib, left_on='food_name', right_on='name', how='left')
 
                 # A. 基礎營養 (直接加總，正負會抵銷)
-                today_cal = df_merged['calories'].sum()
+                today_net_cal = df_merged['calories'].sum()
                 today_prot = df_merged['protein'].sum()
                 today_fat = df_merged['fat'].sum()
-                today_phos = df_merged['phos'].sum()
+                if 'phos' in df_merged.columns: today_phos = df_merged['phos'].sum()
 
                 # 計算水份 (淨重 * 水份% / 100)
-                # 剩食時 net_weight 為負數，這裡算出來的水份也會是負數，剛好抵銷
                 df_merged['calc_water'] = df_merged['net_weight'] * (df_merged['moisture_pct'].fillna(0)/100)
                 today_water = df_merged['calc_water'].sum()
 
@@ -441,13 +424,10 @@ def main():
 
                 # C. 食用量（只算 food，包含正負數加總）
                 today_eaten = df_merged.loc[mask_is_food, 'net_weight'].sum()
-
-
             
             except Exception as e:
                 st.error(f"統計計算錯誤: {e}")
 
-    
         # 顯示看板
         st.markdown("##### 📊 今日營養統計")
         cols = st.columns(7)
@@ -472,209 +452,197 @@ def main():
         
         # 2. 顯示對應表單
         if record_type == "🥣 餵食":
-            # --- 餵食模式（原本的選單） ---
+            # --- 餵食模式 ---
             df_menu = fetch_pet_menu(pet_id)
             if df_menu.empty:
                 st.warning("點餐本是空的！請到「食物資料庫」新增。")
             else:
                 with st.container(border=True):
                     c_meal, c_food, c_weight = st.columns([1,2,1])
-
                     meal_time = c_meal.selectbox("餐別", ["第一餐","第二餐","第三餐","第四餐","第五餐","第六餐","第七餐","第八餐","第九餐","第十餐"])
-
-                # 製作選單選項：[類別] 品牌 - 品名
-                menu_option = []
-                for _, row in df_menu.iterrows():
-                    # 處理中文類別
-                    cat = CATEGORY_MAP.get(row['category'], row['category'])
-                    # 處理 None 值
-                    brand = row['brand'] or ""
-                    label = f"[{cat}] {brand} - {row['name']}"
-                    menu_option.append({"label": label, "data":row})
-
-                
-                sel_opt = c_food.selectbox("選擇食物", menu_option, format_func=lambda x:x['label'])
-                f_data = sel_opt['data']
-
-                # 單位提示
-                unit = f_data.get('unit_type','g')
-                weight = c_weight.number_input(f"份量 ({unit})", min_value=0.0, step=1.0)
-
-                # 顯示營養密度提示
-                cal_100g = float(f_data.get('calories_100g', 0))
-                st.caption(f"ℹ️ 熱量密度：{cal_100g} kcal/100g")
-
-                if st.button("新增餵食", type="primary", use_container_width=True):
-                    if weight > 0:
-                        # 計算營養
-                        ratio = weight / 100.0 if unit == "g" else weight
-                        entry = {
-                            "timestamp": f"{today_date}{datetime.now().strftime('%H:%M:%S')}",
-                            "date_str": str(today_date),
-                            "meal_name": meal_time,
-                            "pet_id": pet_id,
-                            "food_name": f_data['name'],
-                            "new_weight": weight,
-                            "calories": cal_100g * ratio,
-                            "protein": float(f_data.get('protein_pct', 0)) * ratio,
-                            "fat": float(f_data.get('fat_pct', 0)) * ratio,
-                            "phos": float(f_data.get('phos_pct', 0)) * ratio,
-                            "log_type": "intake"
-                        }
-                        if save_log_entry([entry]):
-                            st.success("✅ 已紀錄"); time.sleep(0,5); st.rerun()
-                else:
-                    # --- 剩食模式 (自動計算平均密度) ---
-                    type_cols[1].info("系統將自動抓取「最近一餐」的平均營養密度進行扣除。")
-
-                    with st.container(border=True):
-                        # 1. 抓取上一餐密度
-                        density_data = get_last_meal_density(pet_id)
-
-                        if density_data:
-                            info_text = density_data['info']
-                            avg_cal = density_data['density_cal']
-                            st.success(f"🔍 已鎖定最近一餐：**{info_text}** (平均熱量: {avg_cal*100:.1f} kcal/100g)")
-
-# ---自已看打的到上面這部份，下面的為無腦貼上
-
-                            c_meal, c_weight = st.columns([1, 1])
-                            meal_time = c_meal.selectbox("餐別(剩食歸屬)", ["早餐", "午餐", "晚餐", "宵夜", "點心"])
-                            weight = c_weight.number_input("剩餘重量 (g)", min_value=0.0, step=1.0)
-                        
-                            if weight > 0:
-                                deduct_cal = weight * density_data['density_cal']
-                                st.caption(f"📉 預計扣除：熱量 -{deduct_cal:.1f} kcal")
-                            
-                            if st.button("記錄剩食 (扣除)", type="secondary", use_container_width=True):
-                                if weight > 0:
-                                    entry = {
-                                        "timestamp": f"{today_date} {datetime.now().strftime('%H:%M:%S')}",
-                                        "date_str": str(today_date),
-                                        "meal_name": meal_time,
-                                        "pet_id": pet_id,
-                                        "food_name": "剩食(混合)", # 固定名稱
-                                        "net_weight": -weight,     # 負數
-                                        "calories": -weight * density_data['density_cal'],
-                                        "protein": -weight * density_data['density_prot'],
-                                        "fat": -weight * density_data['density_fat'],
-                                        "phos": -weight * density_data['density_phos'],
-                                        "log_type": "waste"
-                                    }
-                                    if save_log_entry([entry]):
-                                        st.success("✅ 已扣除剩食"); time.sleep(0.5); st.rerun()
-                        else:
-                            st.warning("⚠️ 找不到最近的進食紀錄，無法計算密度。請先新增餵食紀錄。")
-
-            # 明細列表
-            if not df_logs.empty:
-                st.markdown("#### 📜 今日明細")
-                cols_show = ['meal_name', 'food_name', 'net_weight', 'calories', 'phos']
-                final_show = [c for c in cols_show if c in df_logs.columns]
-                show_df = df_logs[final_show].copy()
-                show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
-                st.dataframe(show_df, use_container_width=True, hide_index=True)
-
-        # --- Tab 2: 匯出 ---
-        with tab2:
-            st.subheader("📥 資料匯出")
-            if st.button("準備匯出 CSV"):
-                with st.spinner("讀取中..."):
-                    df_exp = fetch_all_logs_for_export(pet_id)
-                if not df_exp.empty:
-                    df_exp = df_exp.rename(columns={'date_str':'日期','meal_name':'餐別','food_name':'食物','net_weight':'淨重','calories':'熱量'})
-                    csv = df_exp.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
-                else: st.info("無資料")
-
-        # --- Tab 3: 食物管理 ---
-        with tab3:
-            st.markdown("#### 1. 新增食物")
-            with st.expander("➕ 展開新增表單"):
-                with st.form("new_food"):
-                    c1, c2 = st.columns(2)
-                    f_cat = c1.selectbox("類別", list(CATEGORY_MAP.values()))
-                    f_name = c2.text_input("品名", placeholder="必填")
-                    f_brand = st.text_input("品牌")
                     
-                    cal_mode = st.radio("熱量標示", ["A. 整份總熱量", "B. 每 100g 熱量"], horizontal=True)
-                    final_cal_100g = 0.0
-                    f_w = 0.0; f_cal = 0.0
+                    menu_option = []
+                    for _, row in df_menu.iterrows():
+                        cat = CATEGORY_MAP.get(row['category'], row['category'])
+                        brand = row['brand'] or ""
+                        label = f"[{cat}] {brand} - {row['name']}"
+                        menu_option.append({"label": label, "data":row})
                     
-                    if "A." in cal_mode:
-                        c_a1, c_a2 = st.columns(2)
-                        f_w = c_a1.number_input("總重 (g)", min_value=0.0)
-                        f_cal = c_a2.number_input("總熱量 (kcal)", min_value=0.0)
-                        if f_w > 0: final_cal_100g = (f_cal / f_w) * 100
-                    else:
-                        c_b1, c_b2 = st.columns(2)
-                        f_w = c_b1.number_input("總重 (g) [選填]", min_value=0.0)
-                        final_cal_100g = c_b2.number_input("每 100g 熱量", min_value=0.0)
-                        if f_w > 0: f_cal = (final_cal_100g * f_w) / 100
-                    
-                    st.markdown("---")
-                    c_n1, c_n2, c_n3, c_n4 = st.columns(4)
-                    f_p = c_n1.number_input("蛋白質 %")
-                    f_f = c_n2.number_input("脂肪 %")
-                    f_ph = c_n3.number_input("磷 %")
-                    f_wat = c_n4.number_input("水份 %")
-                    f_unit = st.selectbox("單位", ["g", "顆", "ml"])
+                    sel_opt = c_food.selectbox("選擇食物", menu_option, format_func=lambda x:x['label'])
+                    f_data = sel_opt['data']
 
-                    if st.form_submit_button("新增"):
-                        if not f_name: st.error("缺品名")
-                        elif final_cal_100g <= 0: st.error("熱量錯誤")
-                        else:
-                            new_data = {
-                                "category": CATEGORY_REVERSE[f_cat], "brand": f_brand, "name": f_name,
-                                "label_weight": f_w, "label_cal": f_cal, "calories_100g": final_cal_100g,
-                                "protein_pct": f_p, "fat_pct": f_f, "phos_pct": f_ph, "moisture_pct": f_wat,
-                                "unit_type": f_unit
+                    unit = f_data.get('unit_type','g')
+                    weight = c_weight.number_input(f"份量 ({unit})", min_value=0.0, step=1.0)
+
+                    cal_100g = float(f_data.get('calories_100g', 0))
+                    st.caption(f"ℹ️ 熱量密度：{cal_100g} kcal/100g")
+
+                    if st.button("新增餵食", type="primary", use_container_width=True):
+                        if weight > 0:
+                            ratio = weight / 100.0 if unit == "g" else weight
+                            entry = {
+                                "timestamp": f"{today_date} {datetime.now().strftime('%H:%M:%S')}",
+                                "date_str": str(today_date),
+                                "meal_name": meal_time,
+                                "pet_id": pet_id,
+                                "food_name": f_data['name'],
+                                # [修正] new_weight -> net_weight (這很重要，不然會存不進去)
+                                "net_weight": weight,
+                                "calories": cal_100g * ratio,
+                                "protein": float(f_data.get('protein_pct', 0)) * ratio,
+                                "fat": float(f_data.get('fat_pct', 0)) * ratio,
+                                "phos": float(f_data.get('phos_pct', 0)) * ratio,
+                                "log_type": "intake"
                             }
-                            if add_new_food_to_library_and_menu(new_data, pet_id):
-                                st.success(f"已新增 {f_name}"); st.rerun()
-            
-            st.markdown("#### 2. 編輯點餐本")
+                            # [修正] time.sleep(0,5) -> time.sleep(0.5) (小數點)
+                            if save_log_entry([entry]):
+                                st.success("✅ 已紀錄"); time.sleep(0.5); st.rerun()
+        else:
+            # --- 剩食模式 ---
+            type_cols[1].info("系統將自動抓取「最近一餐」的平均營養密度進行扣除。")
+
+            with st.container(border=True):
+                density_data = get_last_meal_density(pet_id)
+
+                if density_data:
+                    info_text = density_data['info']
+                    avg_cal = density_data['density_cal']
+                    st.success(f"🔍 已鎖定最近一餐：**{info_text}** (平均熱量: {avg_cal*100:.1f} kcal/100g)")
+
+                    c_meal, c_weight = st.columns([1, 1])
+                    meal_time = c_meal.selectbox("餐別(剩食歸屬)", ["早餐", "午餐", "晚餐", "宵夜", "點心"])
+                    weight = c_weight.number_input("剩餘重量 (g)", min_value=0.0, step=1.0)
+                
+                    if weight > 0:
+                        deduct_cal = weight * density_data['density_cal']
+                        st.caption(f"📉 預計扣除：熱量 -{deduct_cal:.1f} kcal")
+                    
+                    if st.button("記錄剩食 (扣除)", type="secondary", use_container_width=True):
+                        if weight > 0:
+                            entry = {
+                                "timestamp": f"{today_date} {datetime.now().strftime('%H:%M:%S')}",
+                                "date_str": str(today_date),
+                                "meal_name": meal_time,
+                                "pet_id": pet_id,
+                                "food_name": "剩食(混合)", 
+                                "net_weight": -weight,     
+                                "calories": -weight * density_data['density_cal'],
+                                "protein": -weight * density_data['density_prot'],
+                                "fat": -weight * density_data['density_fat'],
+                                "phos": -weight * density_data['density_phos'],
+                                "log_type": "waste"
+                            }
+                            if save_log_entry([entry]):
+                                st.success("✅ 已扣除剩食"); time.sleep(0.5); st.rerun()
+                else:
+                    st.warning("⚠️ 找不到最近的進食紀錄，無法計算密度。請先新增餵食紀錄。")
+
+        if not df_logs.empty:
+            st.markdown("#### 📜 今日明細")
+            cols_show = ['meal_name', 'food_name', 'net_weight', 'calories', 'phos']
+            final_show = [c for c in cols_show if c in df_logs.columns]
+            show_df = df_logs[final_show].copy()
+            show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
+            st.dataframe(show_df, use_container_width=True, hide_index=True)
+
+    # --- Tab 2: 匯出 ---
+    with tab2:
+        st.subheader("📥 資料匯出")
+        if st.button("準備匯出 CSV"):
+            with st.spinner("讀取中..."):
+                df_exp = fetch_all_logs_for_export(pet_id)
+            if not df_exp.empty:
+                df_exp = df_exp.rename(columns={'date_str':'日期','meal_name':'餐別','food_name':'食物','net_weight':'淨重','calories':'熱量'})
+                csv = df_exp.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
+            else: st.info("無資料")
+
+    # --- Tab 3: 食物管理 ---
+    with tab3:
+        st.markdown("#### 1. 新增食物")
+        with st.expander("➕ 展開新增表單"):
+            with st.form("new_food"):
+                c1, c2 = st.columns(2)
+                f_cat = c1.selectbox("類別", list(CATEGORY_MAP.values()))
+                f_name = c2.text_input("品名", placeholder="必填")
+                f_brand = st.text_input("品牌")
+                
+                cal_mode = st.radio("熱量標示", ["A. 整份總熱量", "B. 每 100g 熱量"], horizontal=True)
+                final_cal_100g = 0.0
+                f_w = 0.0; f_cal = 0.0
+                
+                if "A." in cal_mode:
+                    c_a1, c_a2 = st.columns(2)
+                    f_w = c_a1.number_input("總重 (g)", min_value=0.0)
+                    f_cal = c_a2.number_input("總熱量 (kcal)", min_value=0.0)
+                    if f_w > 0: final_cal_100g = (f_cal / f_w) * 100
+                else:
+                    c_b1, c_b2 = st.columns(2)
+                    f_w = c_b1.number_input("總重 (g) [選填]", min_value=0.0)
+                    final_cal_100g = c_b2.number_input("每 100g 熱量", min_value=0.0)
+                    if f_w > 0: f_cal = (final_cal_100g * f_w) / 100
+                
+                st.markdown("---")
+                c_n1, c_n2, c_n3, c_n4 = st.columns(4)
+                f_p = c_n1.number_input("蛋白質 %")
+                f_f = c_n2.number_input("脂肪 %")
+                f_ph = c_n3.number_input("磷 %")
+                f_wat = c_n4.number_input("水份 %")
+                f_unit = st.selectbox("單位", ["g", "顆", "ml"])
+
+                if st.form_submit_button("新增"):
+                    if not f_name: st.error("缺品名")
+                    elif final_cal_100g <= 0: st.error("熱量錯誤")
+                    else:
+                        new_data = {
+                            "category": CATEGORY_REVERSE[f_cat], "brand": f_brand, "name": f_name,
+                            "label_weight": f_w, "label_cal": f_cal, "calories_100g": final_cal_100g,
+                            "protein_pct": f_p, "fat_pct": f_f, "phos_pct": f_ph, "moisture_pct": f_wat,
+                            "unit_type": f_unit
+                        }
+                        if add_new_food_to_library_and_menu(new_data, pet_id):
+                            st.success(f"已新增 {f_name}"); st.rerun()
+        
+        st.markdown("#### 2. 編輯點餐本")
+        try:
+            res_all = supabase.table('food_library').select("*").execute()
+            df_all = pd.DataFrame(res_all.data)
+        except: df_all = pd.DataFrame()
+
+        if not df_all.empty:
             try:
-                res_all = supabase.table('food_library').select("*").execute()
-                df_all = pd.DataFrame(res_all.data)
-            except: df_all = pd.DataFrame()
+                res_my = supabase.table('pet_food_relations').select("food_id").eq("pet_id", pet_id).execute()
+                my_ids = [x['food_id'] for x in res_my.data]
+            except: my_ids = []
 
-            if not df_all.empty:
-                try:
-                    res_my = supabase.table('pet_food_relations').select("food_id").eq("pet_id", pet_id).execute()
-                    my_ids = [x['food_id'] for x in res_my.data]
-                except: my_ids = []
-
-                cats = df_all['category'].unique()
-                cat_opts = [CATEGORY_MAP.get(c, c) for c in cats]
-                sel_cat_dis = st.selectbox("篩選類別", cat_opts)
-                sel_cat_code = next((k for k, v in CATEGORY_MAP.items() if v == sel_cat_dis), sel_cat_dis)
+            cats = df_all['category'].unique()
+            cat_opts = [CATEGORY_MAP.get(c, c) for c in cats]
+            sel_cat_dis = st.selectbox("篩選類別", cat_opts)
+            sel_cat_code = next((k for k, v in CATEGORY_MAP.items() if v == sel_cat_dis), sel_cat_dis)
+            
+            df_view = df_all[df_all['category'] == sel_cat_code].copy()
+            df_view['selected'] = df_view['id'].isin(my_ids)
+            
+            edited = st.data_editor(
+                df_view[['selected', 'brand', 'name', 'calories_100g']],
+                column_config={"selected": st.column_config.CheckboxColumn("加入", default=False)},
+                disabled=["brand", "name", "calories_100g"],
+                use_container_width=True, key="menu_edit"
+            )
+            
+            if st.button("更新此類別"):
+                cur_sel = edited[edited['selected']]['id'].tolist()
+                all_ids = df_view['id'].tolist()
                 
-                df_view = df_all[df_all['category'] == sel_cat_code].copy()
-                df_view['selected'] = df_view['id'].isin(my_ids)
+                to_add = set(cur_sel) - set(my_ids)
+                to_del = set(my_ids).intersection(all_ids) - set(cur_sel)
                 
-                edited = st.data_editor(
-                    df_view[['selected', 'brand', 'name', 'calories_100g']],
-                    column_config={"selected": st.column_config.CheckboxColumn("加入", default=False)},
-                    disabled=["brand", "name", "calories_100g"],
-                    use_container_width=True, key="menu_edit"
-                )
-                
-                if st.button("更新此類別"):
-                    cur_sel = edited[edited['selected']]['id'].tolist()
-                    all_ids = df_view['id'].tolist()
-                    
-                    to_add = set(cur_sel) - set(my_ids)
-                    to_del = set(my_ids).intersection(all_ids) - set(cur_sel)
-                    
-                    if to_add:
-                        supabase.table('pet_food_relations').insert([{"pet_id": pet_id, "food_id": i} for i in to_add]).execute()
-                    if to_del:
-                        for i in to_del:
-                            supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
-                    st.toast("已更新"); time.sleep(1); st.rerun()
+                if to_add:
+                    supabase.table('pet_food_relations').insert([{"pet_id": pet_id, "food_id": i} for i in to_add]).execute()
+                if to_del:
+                    for i in to_del:
+                        supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
+                st.toast("已更新"); time.sleep(1); st.rerun()
 
 if __name__ == "__main__":
     main()
-                        
-
