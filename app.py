@@ -373,9 +373,11 @@ def main():
         
         # --- [修改點 1] 歡迎畫面的 Logo ---
         # st.title("🐱 歡迎使用寵物飲食紀錄")
-        col1, col2 = st.columns([1,4])
+        # [修改] 調整欄位比例，讓圖片欄窄一點 (原本是 [1, 4])
+        # [修改] 設定 width=100 (約 100像素寬)，取代原本的 use_container_width=True
+        col1, col2 = st.columns([0.5, 4])
         with col1:
-            try: st.image("logo.png", use_container_width=True)
+            try: st.image("logo.png", use_container_width=100)
             except: st.header("🐱")
         with col2:
             st.title("歡迎使用寵物飲食紀錄")
@@ -391,10 +393,11 @@ def main():
     # 原本： with c2: today_date = st.date_input("紀錄日期", date.today())
     # 修改為更細緻的排版：Logo | 標題 | 日期    
     # 比例分配：Logo(1) : 標題(4) : 空白(0.5) : 日期(2)
-    c_go, c_title, _, c_date = st.columns([1, 4, 0.5, 2])
+    # [修改] 調整欄位比例 (原本是 [1, 4, ...])
+    c_go, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
     with c_logo:
-        try: st.image("logo.png", use_container_width=True)
+        try: st.image("logo.png", use_container_width=80)
         except: st.header("🐱")
     
     with c_title:
