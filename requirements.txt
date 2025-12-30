@@ -1,5 +1,5 @@
 streamlit
 pandas
-supbase
-pillow
-stremlit-cropper
+supabase
+Pillow
+streamlit-cropper
