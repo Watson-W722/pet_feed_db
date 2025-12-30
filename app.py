@@ -397,7 +397,7 @@ def main():
     c_go, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
     with c_logo:
-        try: st.image("logo.png", use_container_width=50)
+        try: st.image("logo.png", use_container_width=25)
         except: st.header("🐱")
     
     with c_title:
