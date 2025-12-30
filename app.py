@@ -14,7 +14,7 @@ from streamlit_cropper import st_cropper
 
 # 讀取圖片
 try:
-    icon_image = Image.open("page_icon.png")
+    icon_image = Image.open("logo.png")
 except:
     icon_image = "🐱" 
 
@@ -370,15 +370,39 @@ def main():
 
     if not current_pet:
         st.info("👈 請先在側邊欄新增寵物資料，才能開始使用喔！")
-        st.title("🐱 歡迎使用寵物飲食紀錄")
+        
+        # --- [修改點 1] 歡迎畫面的 Logo ---
+        # st.title("🐱 歡迎使用寵物飲食紀錄")
+        col1, col2 = st.columns([1,4])
+        with col1:
+            try: st.image("logo.png", use_container_width=True)
+            except: st.header("🐱")
+        with col2:
+            st.title("歡迎使用寵物飲食紀錄")
         st.stop()
     
     pet_id = current_pet['id']
     pet_name = current_pet['name']
 
-    c1, c2 = st.columns([3,1])
-    with c1: st.title(f"🍽️ {pet_name} 的飲食日記")
-    with c2: today_date = st.date_input("紀錄日期", date.today())
+
+    # --- [修改點 2] 主畫面的標題 ---
+    # 原本：c1, c2 = st.columns([3,1])
+    # 原本： with c1: st.title(f"🍽️ {pet_name} 的飲食日記")
+    # 原本： with c2: today_date = st.date_input("紀錄日期", date.today())
+    # 修改為更細緻的排版：Logo | 標題 | 日期    
+    # 比例分配：Logo(1) : 標題(4) : 空白(0.5) : 日期(2)
+    c_go, c_title, _, c_date = st.columns([1, 4, 0.5, 2])
+
+    with c_logo:
+        try: st.image("logo.png", use_container_width=True)
+        except: st.header("🐱")
+    
+    with c_title:
+        # 稍微調整一下 css 讓標題對齊圖片 (選用)
+        st.markdown(f"<h1 style='padding-top: 0px;'>{pet_name} 的飲食日記</h1>", unsafe_allow_html=True)
+
+    with c_data:
+        today_date = st.date_input("紀錄日期", date.today(), label_visibility="collapsed")
 
     tab1, tab2, tab3 = st.tabs(["📝 紀錄飲食", "📊 數據與匯出", "🍎 食物資料庫管理"])
 
