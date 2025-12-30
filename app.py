@@ -261,7 +261,9 @@ def render_sidebar():
         existing_names = df_pets['name'].tolist()
         pet_names = existing_names + ["➕ 新增寵物"]
         for _, row in df_pets.iterrows():
-            pet_map[row['name']] = row
+            # [修正重點] 把 row 改成 row.to_dict(), 加上 .to_dict() 把 Pandas Series 轉成 Python 字典
+            # 這樣後面的 if not current_pet 判斷才不會報錯
+            pet_map[row['name']] = row.to_dict()
     
     selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
     current_pet_data = {}
