@@ -536,5 +536,145 @@ def main():
                             avg_cal = density_data['density_cal']
                             st.success(f"🔍 已鎖定最近一餐：**{info_text}** (平均熱量: {avg_cal*100:.1f} kcal/100g)")
 
+# ---自已看打的到上面這部份，下面的為無腦貼上
+
+                            c_meal, c_weight = st.columns([1, 1])
+                            meal_time = c_meal.selectbox("餐別(剩食歸屬)", ["早餐", "午餐", "晚餐", "宵夜", "點心"])
+                            weight = c_weight.number_input("剩餘重量 (g)", min_value=0.0, step=1.0)
+                        
+                            if weight > 0:
+                                deduct_cal = weight * density_data['density_cal']
+                                st.caption(f"📉 預計扣除：熱量 -{deduct_cal:.1f} kcal")
+                            
+                            if st.button("記錄剩食 (扣除)", type="secondary", use_container_width=True):
+                                if weight > 0:
+                                    entry = {
+                                        "timestamp": f"{today_date} {datetime.now().strftime('%H:%M:%S')}",
+                                        "date_str": str(today_date),
+                                        "meal_name": meal_time,
+                                        "pet_id": pet_id,
+                                        "food_name": "剩食(混合)", # 固定名稱
+                                        "net_weight": -weight,     # 負數
+                                        "calories": -weight * density_data['density_cal'],
+                                        "protein": -weight * density_data['density_prot'],
+                                        "fat": -weight * density_data['density_fat'],
+                                        "phos": -weight * density_data['density_phos'],
+                                        "log_type": "waste"
+                                    }
+                                    if save_log_entry([entry]):
+                                        st.success("✅ 已扣除剩食"); time.sleep(0.5); st.rerun()
+                        else:
+                            st.warning("⚠️ 找不到最近的進食紀錄，無法計算密度。請先新增餵食紀錄。")
+
+            # 明細列表
+            if not df_logs.empty:
+                st.markdown("#### 📜 今日明細")
+                cols_show = ['meal_name', 'food_name', 'net_weight', 'calories', 'phos']
+                final_show = [c for c in cols_show if c in df_logs.columns]
+                show_df = df_logs[final_show].copy()
+                show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
+                st.dataframe(show_df, use_container_width=True, hide_index=True)
+
+        # --- Tab 2: 匯出 ---
+        with tab2:
+            st.subheader("📥 資料匯出")
+            if st.button("準備匯出 CSV"):
+                with st.spinner("讀取中..."):
+                    df_exp = fetch_all_logs_for_export(pet_id)
+                if not df_exp.empty:
+                    df_exp = df_exp.rename(columns={'date_str':'日期','meal_name':'餐別','food_name':'食物','net_weight':'淨重','calories':'熱量'})
+                    csv = df_exp.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
+                else: st.info("無資料")
+
+        # --- Tab 3: 食物管理 ---
+        with tab3:
+            st.markdown("#### 1. 新增食物")
+            with st.expander("➕ 展開新增表單"):
+                with st.form("new_food"):
+                    c1, c2 = st.columns(2)
+                    f_cat = c1.selectbox("類別", list(CATEGORY_MAP.values()))
+                    f_name = c2.text_input("品名", placeholder="必填")
+                    f_brand = st.text_input("品牌")
+                    
+                    cal_mode = st.radio("熱量標示", ["A. 整份總熱量", "B. 每 100g 熱量"], horizontal=True)
+                    final_cal_100g = 0.0
+                    f_w = 0.0; f_cal = 0.0
+                    
+                    if "A." in cal_mode:
+                        c_a1, c_a2 = st.columns(2)
+                        f_w = c_a1.number_input("總重 (g)", min_value=0.0)
+                        f_cal = c_a2.number_input("總熱量 (kcal)", min_value=0.0)
+                        if f_w > 0: final_cal_100g = (f_cal / f_w) * 100
+                    else:
+                        c_b1, c_b2 = st.columns(2)
+                        f_w = c_b1.number_input("總重 (g) [選填]", min_value=0.0)
+                        final_cal_100g = c_b2.number_input("每 100g 熱量", min_value=0.0)
+                        if f_w > 0: f_cal = (final_cal_100g * f_w) / 100
+                    
+                    st.markdown("---")
+                    c_n1, c_n2, c_n3, c_n4 = st.columns(4)
+                    f_p = c_n1.number_input("蛋白質 %")
+                    f_f = c_n2.number_input("脂肪 %")
+                    f_ph = c_n3.number_input("磷 %")
+                    f_wat = c_n4.number_input("水份 %")
+                    f_unit = st.selectbox("單位", ["g", "顆", "ml"])
+
+                    if st.form_submit_button("新增"):
+                        if not f_name: st.error("缺品名")
+                        elif final_cal_100g <= 0: st.error("熱量錯誤")
+                        else:
+                            new_data = {
+                                "category": CATEGORY_REVERSE[f_cat], "brand": f_brand, "name": f_name,
+                                "label_weight": f_w, "label_cal": f_cal, "calories_100g": final_cal_100g,
+                                "protein_pct": f_p, "fat_pct": f_f, "phos_pct": f_ph, "moisture_pct": f_wat,
+                                "unit_type": f_unit
+                            }
+                            if add_new_food_to_library_and_menu(new_data, pet_id):
+                                st.success(f"已新增 {f_name}"); st.rerun()
+            
+            st.markdown("#### 2. 編輯點餐本")
+            try:
+                res_all = supabase.table('food_library').select("*").execute()
+                df_all = pd.DataFrame(res_all.data)
+            except: df_all = pd.DataFrame()
+
+            if not df_all.empty:
+                try:
+                    res_my = supabase.table('pet_food_relations').select("food_id").eq("pet_id", pet_id).execute()
+                    my_ids = [x['food_id'] for x in res_my.data]
+                except: my_ids = []
+
+                cats = df_all['category'].unique()
+                cat_opts = [CATEGORY_MAP.get(c, c) for c in cats]
+                sel_cat_dis = st.selectbox("篩選類別", cat_opts)
+                sel_cat_code = next((k for k, v in CATEGORY_MAP.items() if v == sel_cat_dis), sel_cat_dis)
+                
+                df_view = df_all[df_all['category'] == sel_cat_code].copy()
+                df_view['selected'] = df_view['id'].isin(my_ids)
+                
+                edited = st.data_editor(
+                    df_view[['selected', 'brand', 'name', 'calories_100g']],
+                    column_config={"selected": st.column_config.CheckboxColumn("加入", default=False)},
+                    disabled=["brand", "name", "calories_100g"],
+                    use_container_width=True, key="menu_edit"
+                )
+                
+                if st.button("更新此類別"):
+                    cur_sel = edited[edited['selected']]['id'].tolist()
+                    all_ids = df_view['id'].tolist()
+                    
+                    to_add = set(cur_sel) - set(my_ids)
+                    to_del = set(my_ids).intersection(all_ids) - set(cur_sel)
+                    
+                    if to_add:
+                        supabase.table('pet_food_relations').insert([{"pet_id": pet_id, "food_id": i} for i in to_add]).execute()
+                    if to_del:
+                        for i in to_del:
+                            supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
+                    st.toast("已更新"); time.sleep(1); st.rerun()
+
+if __name__ == "__main__":
+    main()
                         
 
