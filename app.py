@@ -79,20 +79,61 @@ def pil_image_to_base64(image):
         st.error(f"圖片轉碼失敗: {e}")
         return None
 
-# --- 寵物相關 ---
-def fetch_pets():
-    try:
-        response = supabase.table('pets').select("*").order('created_at').execute()
-        return pd.DataFrame(response.data)
-    except Exception as e:
-        return pd.DataFrame()
-
 def save_pet(data_dict, pet_id=None):
     if pet_id:
         supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
     else:
         supabase.table('pets').insert(data_dict).execute()
     st.cache_data.clear()
+
+# --- 寵物相關 --- 檢查有沒有資料
+def fetch_pets():
+    try:
+        # [修改] 增加過濾條件：只抓 is_deleted 為 false (或是 null) 的寵物
+        response = supabase.table('pets').select("*")\
+            .neq('is_deleted', True)\
+            .order('created_at').execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        return pd.DataFrame()      
+
+# [新增] 檢查寵物是否有關聯資料 (點餐本 或 飲食紀錄)
+def check_pet_has_data(pet_id):
+    try:
+        # 檢查點餐本
+        res_menu = supabase.table('pet_food_relations').select("id", count='exact').eq('pet_id', pet_id).execute() 
+        count_menu = res_menu.count if res_menu.count is not None else len(res_menu.data)
+
+        # 檢查飲食紀錄
+        res_logs = supabase.table('diet_logs').select("id", count='exact').eq('pet_id', pet_id).execute()
+        count_logs = res_logs.count if res_logs.count is not None else len (res_logs.data)
+
+        return(count_menu + count_logs) > 0
+    except:
+        return False
+
+# [新增] 執行軟刪除 (註記刪除)
+def soft_delete_pet(pet_id, reason):
+    try:
+        supabase.table('pets').update({
+            "is_deleted": True,
+            "deletion_reason": reason
+        }).eq('id', pet_id).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"軟刪除失敗: {e}")
+        return False
+
+# [新增] 執行硬刪除 (直接消失)
+def hard_delete_pet(pet_id):
+    try:
+        supabase.table('pets').delete().eq('id', pet_id).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"刪除失敗: {e}")
+        return False
 
 def calculate_age(birth_date_str):
     if not birth_date_str: return "未知"
@@ -292,8 +333,38 @@ def render_sidebar():
         - ⚖️ **體重**: {current_pet_data.get('weight', 0)} kg
         - 🏥 **狀況**: {status_text}
         """)
+# === [新增] 智慧刪除區塊 ===
+    with st.sidebar.expander("🗑️ 刪除 / 封存此寵物", expanded=False):
+        # 1. 先檢查有沒有資料
+        # (注意：這裡要確認您有定義 check_pet_has_data 這個函式)
+        has_data = check_pet_has_data(current_pet_data['id'])
 
-        st.sidebar.divider()
+        if has_data:
+            # A. 有資料 -> 走軟刪除流程
+            st.info()
+
+            st.sidebar.divider("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
+            st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式，資料不會真正消失，但在選單中將不再顯示。")
+
+            # 輸入原因
+            del_reason = st.text_input("請輸入刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養、誤建檔...")
+
+            if st.button("確認封存", type="primary", key="btn_soft_del"):
+                if not del_reason.strip():
+                    st.error("請填寫原因才能刪除喔！")
+                else:
+                    if soft_delete_pet(current_pet_data['id', del_reason]):
+                        st.toast(f"已封存 {selected_pet_name}")
+                        time.sleep(1)
+                        st.rerun()
+        else:
+            # B. 沒資料 -> 走硬刪除流程
+            st.info("此寵物尚無任何紀錄，可直接刪除。")
+            if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
+                if hard_delete_pet(current_pet_data['id']):
+                    st.toast(f"已永久刪除 {selected_pet_name}")
+                    time.sleep(1)
+                    st.rerun
 
     # --- 編輯/新增寵物表單 ---
     with st.sidebar.expander(f"{'新增' if selected_pet_name == '➕ 新增寵物' else '編輯'} 資料"):
