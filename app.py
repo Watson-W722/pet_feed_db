@@ -625,8 +625,8 @@ def main():
             show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
             st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-    # --- Tab 3: 食物管理 ---
-    with tab3:
+    # --- Tab 2: 食物管理 ---
+    with tab2:
         st.markdown("#### 1. 新增食物")
         with st.expander("➕ 展開新增表單"):
             with st.form("new_food"):
@@ -712,8 +712,8 @@ def main():
                         supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
                 st.toast("已更新"); time.sleep(1); st.rerun()
 
-    # --- Tab 2: 匯出 ---
-    with tab2:
+    # --- Tab 3: 匯出 ---
+    with tab3:
         st.subheader("📥 資料匯出")
         if st.button("準備匯出 CSV"):
             with st.spinner("讀取中..."):
