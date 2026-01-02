@@ -75,7 +75,7 @@ supabase = init_supabase()
 def pil_image_to_base64(image):
     """將 PIL 圖片物件轉為 Base64 字串 (給裁切器用)"""
     try:
-        # [修正] 確保轉換為 RGB 模式
+        # [修正] 確保轉換為 RGB 模式 (解決 PNG 透明圖存檔報錯問題)
         if image.mode in ("RGBA", "P"):
             image = image.convert("RGB")
             
@@ -97,6 +97,7 @@ def save_pet(data_dict, pet_id=None):
 # --- 寵物相關 --- 
 def fetch_pets():
     try:
+        # [修改] 增加過濾條件：只抓 is_deleted 為 false (或是 null) 的寵物
         response = supabase.table('pets').select("*")\
             .neq('is_deleted', True)\
             .order('created_at').execute()
@@ -104,18 +105,22 @@ def fetch_pets():
     except Exception as e:
         return pd.DataFrame()      
 
-# 檢查寵物是否有關聯資料
+# [新增] 檢查寵物是否有關聯資料 (點餐本 或 飲食紀錄)
 def check_pet_has_data(pet_id):
     try:
+        # 檢查點餐本
         res_menu = supabase.table('pet_food_relations').select("id", count='exact').eq('pet_id', pet_id).execute() 
         count_menu = res_menu.count if res_menu.count is not None else len(res_menu.data)
+
+        # 檢查飲食紀錄
         res_logs = supabase.table('diet_logs').select("id", count='exact').eq('pet_id', pet_id).execute()
         count_logs = res_logs.count if res_logs.count is not None else len(res_logs.data)
+
         return (count_menu + count_logs) > 0
     except:
         return False
 
-# 軟刪除
+# [新增] 執行軟刪除 (註記刪除)
 def soft_delete_pet(pet_id, reason):
     try:
         supabase.table('pets').update({
@@ -128,7 +133,7 @@ def soft_delete_pet(pet_id, reason):
         st.error(f"軟刪除失敗: {e}")
         return False
 
-# 硬刪除
+# [新增] 執行硬刪除 (直接消失)
 def hard_delete_pet(pet_id):
     try:
         supabase.table('pets').delete().eq('id', pet_id).execute()
@@ -217,7 +222,12 @@ def fetch_all_logs_for_export(pet_id):
     
 # -- [新增] 計算前一餐平均密度的函式 --
 def get_last_meal_density(pet_id):
+    """
+    抓取該寵物最近一餐的進食紀錄，並計算混合營養密度。
+    排除藥品、保養品，只計算食物類別。
+    """
     try:
+        # 1. 抓取最近 50 筆紀錄（按時間倒序）
         logs_res = supabase.table('diet_logs')\
             .select("*")\
             .eq('pet_id', pet_id)\
@@ -229,6 +239,7 @@ def get_last_meal_density(pet_id):
         logs = logs_res.data
         if not logs: return None
 
+        # 2. 找到「最近一餐」的 meal_name 和 date_str
         target_meal = None
         target_date = None
 
@@ -240,12 +251,17 @@ def get_last_meal_density(pet_id):
 
         if not target_meal: return None
         
+        # 3. 為了精準排除非食物，我們需要再去撈 food_library 確認類別
+        # [修正] 變數名稱修正 l (小寫L)
         this_meal_logs = [l for l in logs if l['meal_name'] == target_meal and l['date_str'] == target_date]
+        
+        # [修正] 變數名稱修正 l (小寫L)
         food_names = [l['food_name'] for l in this_meal_logs]
 
         lib_res = supabase.table('food_library').select('name, category').in_('name', food_names).execute()
         food_cat_map = {item['name']: item['category'] for item in lib_res.data}
 
+        # 4. 加總該餐的營養素 (只計算食物類別)
         total_weight = 0.0
         total_cal = 0.0
         total_prot = 0.0
@@ -253,6 +269,7 @@ def get_last_meal_density(pet_id):
         total_phos = 0.0
 
         for entry in this_meal_logs:
+            # 判斷類別
             cat = food_cat_map.get(entry['food_name'], 'other')
             if cat in FOOD_CATEGORIES_CODE and entry['net_weight'] >  0:
                 total_weight += entry['net_weight'] 
@@ -263,6 +280,7 @@ def get_last_meal_density(pet_id):
             
         if total_weight <= 0: return None
 
+        # 5. 回傳密度與資訊
         return {
             "density_cal": total_cal / total_weight,
             "density_prot": total_prot / total_weight,
@@ -321,23 +339,25 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- 編輯/新增區塊 (使用 session_state 控制收合) ---
+    # --- 編輯/新增寵物表單 (在上方)(使用 session_state 控制收合)  ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
-    
+
+    # 判斷是否要自動展開：如果是新增模式，或是剛剛按了編輯
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
-    
+
     with st.sidebar.expander(expander_title, expanded=is_expanded):
         p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
         default_date = date.today()
         if current_pet_data.get('birth_date'):
-            try: default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+            try:
+                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
             except: pass
 
         p_bday = st.date_input("生日", value=default_date)
         p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
         p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
+        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
 
         current_tags = current_pet_data.get('health_tags') or []
         valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
@@ -356,25 +376,19 @@ def render_sidebar():
             st.caption("👇 請在圖片上拖拉藍框 (預覽圖在下方)")
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
+
+            # [縮圖與設定] 避免過大
+            img_to_crop.thumbnail((600, 600))
             
-            # [修正 1] 不要縮太小，保留一點畫質 (設為 600px)，避免座標誤差
-            # 這樣裁切出來的大頭貼也會比較清楚
-            if img_to_crop.width > 600:
-                img_to_crop.thumbnail((600,600)) 
-            
-            # [修正 2] 透過 st.columns 限制「顯示寬度」，而不是限制「圖片寬度」
-            # 這樣視覺上不會太大，但裁切邏輯是正常的
+            # 顯示裁切器 (限制寬度)
             col_crop, _ = st.columns([0.9, 0.1])
             with col_crop:
                 cropped_img = st_cropper(
                     img_to_crop, 
                     aspect_ratio=(1,1), 
                     box_color='#0000FF', 
-                    # [關鍵修正] 設為 True，讓套件自己去計算縮放比例，才不會跑位
                     should_resize_image=True,
-                    # 保持 False，避免藍框亂跳，記得提醒使用者「放開滑鼠」
-                    realtime_update=False,
-                    # [新增] 加上 key，確保狀態唯一
+                    realtime_update=False, # 防止藍框亂跳
                     key="pet_cropper"
                 )
             
@@ -407,33 +421,38 @@ def render_sidebar():
                 save_pet(pet_payload)
                 st.toast("新寵物已建立!")
             
-            # 收合並重整
-            st.session_state.expand_edit = False 
+            # 儲存成功後，設定旗標讓選單收合，並重整頁面
+            st.session_state.expand_edit = False
             time.sleep(1)
             st.rerun()
 
-    # === 刪除區塊 ===
+    # === [修正] 刪除區塊 (移到下方，且修正語法錯誤) ===
     if selected_pet_name != "➕ 新增寵物":
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
             has_data = check_pet_has_data(current_pet_data['id'])
 
             if has_data:
-                st.info("💡 系統偵測此寵物已有紀錄。")
-                st.warning("將採用「封存 (註記刪除)」方式，資料不會真正消失。")
+                # A. 有資料 -> 走軟刪除流程
+                st.info("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
+                st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式。")
+
                 del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養...")
 
                 if st.button("確認封存", type="secondary", key="btn_soft_del"):
                     if not del_reason.strip():
                         st.error("請填寫原因！")
                     else:
+                        # [修正] 括號與逗號位置
                         if soft_delete_pet(current_pet_data['id'], del_reason):
                             st.toast(f"已封存 {selected_pet_name}")
                             time.sleep(1)
                             st.rerun()
             else:
+                # [修正] st.info 拼寫錯誤
                 st.info("無紀錄，可直接刪除。")
                 if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
+                    # [修正] 補上冒號
                     if hard_delete_pet(current_pet_data['id']):
                         st.toast(f"已永久刪除 {selected_pet_name}")
                         time.sleep(1)
@@ -454,6 +473,7 @@ def main():
     if not current_pet:
         st.info("👈 請先在側邊欄新增寵物資料，才能開始使用喔！")
         
+        # --- [修改] 歡迎畫面 ---
         col1, col2 = st.columns([0.5, 4])
         with col1:
             try: st.image("logo.png", width=80)
@@ -465,7 +485,8 @@ def main():
     pet_id = current_pet['id']
     pet_name = current_pet['name']
 
-    # --- 主畫面標題 (修改：有照片顯示照片) ---
+    # --- [修改] 主畫面標題 ---
+    # [修正] 變數名稱 c_logo
     c_logo, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
     with c_logo:
@@ -479,6 +500,7 @@ def main():
     with c_title:
         st.markdown(f"<h1 style='padding-top: 0px;'>{pet_name} 的飲食日記</h1>", unsafe_allow_html=True)
 
+    # [修正] c_date
     with c_date:
         today_date = st.date_input("紀錄日期", date.today(), label_visibility="collapsed")
 
@@ -489,6 +511,7 @@ def main():
     with tab1:
         df_logs = fetch_daily_logs(pet_id, str(today_date))
 
+        # [統計看板邏輯]
         today_net_cal = 0.0 
         today_feed = 0.0 
         today_input = 0.0 
@@ -503,26 +526,34 @@ def main():
                 lib_res = supabase.table('food_library').select("name, category, moisture_pct").execute()
                 df_lib = pd.DataFrame(lib_res.data)
 
+                # 合併資料
                 df_merged = pd.merge(df_logs, df_lib, left_on='food_name', right_on='name', how='left')
 
+                # A. 基礎營養 (直接加總，正負會抵銷)
                 today_net_cal = df_merged['calories'].sum()
                 today_prot = df_merged['protein'].sum()
                 today_fat = df_merged['fat'].sum()
                 if 'phos' in df_merged.columns: today_phos = df_merged['phos'].sum()
 
+                # 計算水份
                 df_merged['calc_water'] = df_merged['net_weight'] * (df_merged['moisture_pct'].fillna(0)/100)
                 today_water = df_merged['calc_water'].sum()
 
+                # 定義食物類別
                 exclude_pets = ['med', 'supp']
                 mask_is_food = ~df_merged['category'].fillna('other').isin(exclude_pets)
                 
+                # B. 投入量
                 mask_positive = df_merged['net_weight'] > 0
                 today_input = df_merged.loc[mask_is_food & mask_positive, 'net_weight'].sum()
+
+                # C. 食用量
                 today_eaten = df_merged.loc[mask_is_food, 'net_weight'].sum()
             
             except Exception as e:
                 st.error(f"統計計算錯誤: {e}")
 
+        # 顯示看板
         st.markdown("##### 📊 今日營養統計")
         cols = st.columns(7)
         def fmt(val, unit=""):  return f"{val:.1f} {unit}" if val > 0 else "-"
@@ -629,7 +660,7 @@ def main():
             show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
             st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-    # --- [修正] Tab 2: 食物管理 (對應您原本的 tab2 功能) ---
+    # --- [修正] Tab 2: 食物管理 ---
     with tab2:
         st.markdown("#### 1. 新增食物")
         with st.expander("➕ 展開新增表單"):
@@ -716,7 +747,7 @@ def main():
                         supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
                 st.toast("已更新"); time.sleep(1); st.rerun()
 
-    # --- [修正] Tab 3: 數據與匯出 (對應您原本的 tab3 功能) ---
+    # --- [修正] Tab 3: 數據與匯出 ---
     with tab3:
         st.subheader("📥 資料匯出")
         if st.button("準備匯出 CSV"):
