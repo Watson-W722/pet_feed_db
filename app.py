@@ -352,24 +352,24 @@ def render_sidebar():
         cropped_img_base64 = None
 
         if p_img_file:
-            st.caption("請在下方拖拉藍色框框選擇範圍：")
+            st.caption("👇 請在圖片上拖拉藍框 (預覽圖在下方)")
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
 
-            # [修正重點 1 & 2]：
-            # 1. realtime_update=False (解決滑鼠亂跳)
-            # 2. 用 col_crop 限制寬度 (解決圖片太大)
-            col_crop, _ = st.columns([0.8, 0.2])
-
-            with col_crop:            
-                cropped_img = st_cropper(
-                    img_to_crop, 
-                    aspect_ratio=(1,1), 
-                    box_color='#0000FF', 
-                    should_resize_image=True,
-                    realtime_update=False # 關鍵修正！
-                )
+            # [修正重點]：在送給 cropper 之前先縮小，避免佔滿畫面
+            # 這樣使用者不用捲動就能同時看到「操作區」和「預覽區」
+            img_to_crop.thumbnail((250,250))
             
+            # 顯示裁切器
+            cropped_img = st_cropper(
+                img_to_crop, 
+                aspect_ratio=(1,1), 
+                box_color='#0000FF', 
+                should_resize_image=False, # 因為我們上面已經自己縮過了
+                realtime_update=True 
+            )
+
+           # 小預覽圖
             st.caption("預覽結果：")
             st.image(cropped_img, width=100)
             cropped_img_base64 = pil_image_to_base64(cropped_img)
@@ -469,10 +469,12 @@ def main():
     with c_logo:
         # 預設顯示 Logo
         img_to_show = "logo.png"
+        is_custom_img = False
 
         # 如果寵物有大頭貼，就換成大頭貼 (Base64)
         if current_pet.get('image_data'):
             img_to_show = f"data:image/jpeg;base64, {current_pet['image_data']}"
+            is_custom_img = True
         
         try: 
             st.image("logo.png", width=80)
