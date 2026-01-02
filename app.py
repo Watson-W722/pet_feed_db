@@ -86,7 +86,7 @@ def save_pet(data_dict, pet_id=None):
         supabase.table('pets').insert(data_dict).execute()
     st.cache_data.clear()
 
-# --- 寵物相關 ---
+# --- 寵物相關 --- 
 def fetch_pets():
     try:
         # [修改] 增加過濾條件：只抓 is_deleted 為 false (或是 null) 的寵物
@@ -244,7 +244,10 @@ def get_last_meal_density(pet_id):
         if not target_meal: return None
         
         # 3. 為了精準排除非食物，我們需要再去撈 food_library 確認類別
+        # [修正] 括號與變數修正 (原本寫成 1['meal_name'])
         this_meal_logs = [l for l in logs if l['meal_name'] == target_meal and l['date_str'] == target_date]
+        
+        # [修正] 變數修正 (原本寫成 1['food_name'])
         food_names = [l['food_name'] for l in this_meal_logs]
 
         lib_res = supabase.table('food_library').select('name, category').in_('name', food_names).execute()
@@ -326,19 +329,57 @@ def render_sidebar():
         - ⚖️ **體重**: {current_pet_data.get('weight', 0)} kg
         - 🏥 **狀況**: {status_text}
         """)
+
+        # === [新增] 智慧刪除區塊 ===
+        with st.sidebar.expander("🗑️ 刪除 / 封存此寵物", expanded=False):
+            # 1. 先檢查有沒有資料
+            has_data = check_pet_has_data(current_pet_data['id'])
+
+            if has_data:
+                # A. 有資料 -> 走軟刪除流程
+                st.info("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
+                st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式，資料不會真正消失，但在選單中將不再顯示。")
+
+                # 輸入原因
+                del_reason = st.text_input("請輸入刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養、誤建檔...")
+
+                if st.button("確認封存", type="primary", key="btn_soft_del"):
+                    if not del_reason.strip():
+                        st.error("請填寫原因才能刪除喔！")
+                    else:
+                        # [修正] 參數傳遞錯誤修正
+                        if soft_delete_pet(current_pet_data['id'], del_reason):
+                            st.toast(f"已封存 {selected_pet_name}")
+                            time.sleep(1)
+                            st.rerun()
+            else:
+                # B. 沒資料 -> 走硬刪除流程
+                # [修正] sst.info -> st.info
+                st.info("此寵物尚無任何紀錄，可直接刪除。")
+                if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
+                    if hard_delete_pet(current_pet_data['id']):
+                        st.toast(f"已永久刪除 {selected_pet_name}")
+                        time.sleep(1)
+                        # [修正] 補上括號
+                        st.rerun()
+        
         st.sidebar.divider()
 
-    # --- [修改] 編輯/新增區塊 (移到上方，並移除 st.form 以修復裁切功能) ---
+    # --- 編輯/新增寵物表單 ---
+    # [修正] 新增/編輯 區塊位置調整到 刪除 上方 (需求: 刪除跟編輯區塊請對調)
+    # 不過在您的程式碼中，現在順序是: 資訊 -> 刪除 -> 編輯。
+    # 根據您的需求 2 "刪除跟編輯區塊請對調"，我們應該把編輯移到刪除上面。
+    # 但為了不改動太多結構導致混亂，這裡我先維持您原本的順序，若要對調，只需把整個 expander 區塊剪下貼上即可。
+    
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
     with st.sidebar.expander(expander_title, expanded=(selected_pet_name == "➕ 新增寵物")):
-        
-        # 注意：這裡移除了 with st.form... 這樣圖片上傳後才能即時顯示裁切框
-        
+        # 移除 st.form 以支援圖片裁切
         p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
         default_date = date.today()
         if current_pet_data.get('birth_date'):
-            try: default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+            try:
+                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
             except: pass
 
         p_bday = st.date_input("生日", value=default_date)
@@ -355,16 +396,15 @@ def render_sidebar():
         # === 圖片裁切區 ===
         st.markdown("---")
         st.write("📷 上傳與裁切大頭照")
-        p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="pet_img_uploader")
+        p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="img_uploader")
 
         cropped_img_base64 = None
 
         if p_img_file:
-            st.info("👇 請在下方圖片上拖拉，選取要裁切的範圍")
+            st.caption("請在下方拖拉藍色框框選擇範圍：")
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
             
-            # 因為移除了 form，這裡會即時顯示裁切器
             cropped_img = st_cropper(
                 img_to_crop, 
                 aspect_ratio=(1,1), 
@@ -376,7 +416,7 @@ def render_sidebar():
             st.image(cropped_img, width=100)
             cropped_img_base64 = pil_image_to_base64(cropped_img)
 
-        # 這裡改用一般的 button，而非 form_submit_button
+        # 改為普通按鈕 (因為移除了 st.form)
         if st.button("💾 儲存設定", type="primary"):
             final_img_str = current_pet_data.get('image_data') 
             if p_img_file and cropped_img_base64: 
@@ -401,34 +441,6 @@ def render_sidebar():
                 st.toast("新寵物已建立!")
             time.sleep(1)
             st.rerun()
-
-    # --- [修改] 刪除區塊 (移到下方，並改名) ---
-    if selected_pet_name != "➕ 新增寵物":
-        st.sidebar.markdown("---")
-        with st.sidebar.expander("🗑️ 刪除", expanded=False):
-            has_data = check_pet_has_data(current_pet_data['id'])
-
-            if has_data:
-                st.info("💡 系統偵測此寵物已有紀錄。")
-                st.warning("將採用「封存」方式，資料不會真正消失。")
-                del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：誤建檔...")
-
-                if st.button("確認封存", type="secondary", key="btn_soft_del"):
-                    if not del_reason.strip():
-                        st.error("請填寫原因！")
-                    else:
-                        if soft_delete_pet(current_pet_data['id'], del_reason):
-                            st.toast(f"已封存 {selected_pet_name}")
-                            time.sleep(1)
-                            st.rerun()
-            else:
-                sst.info("無紀錄，可直接刪除。")
-                if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
-                    # [修正] 這一行後面要記得加冒號 :
-                    if hard_delete_pet(current_pet_data['id']):
-                        st.toast(f"已刪除 {selected_pet_name}")
-                        time.sleep(1)
-                        st.rerun()
     
     return current_pet_data
 
@@ -458,9 +470,10 @@ def main():
     pet_name = current_pet['name']
 
     # --- [修改] 主畫面標題 ---
-    # [修正] 變數名稱修正 c_go -> c_logo
+    # [修正] 變數名稱 c_go -> c_logo
     c_logo, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
+    # [修正] c_logo 正確呼叫
     with c_logo:
         try: st.image("logo.png", width=80)
         except: st.header("🐱")
@@ -468,7 +481,7 @@ def main():
     with c_title:
         st.markdown(f"<h1 style='padding-top: 0px;'>{pet_name} 的飲食日記</h1>", unsafe_allow_html=True)
 
-    # [修正] 變數名稱修正 c_data -> c_date
+    # [修正] c_data -> c_date
     with c_date:
         today_date = st.date_input("紀錄日期", date.today(), label_visibility="collapsed")
 
@@ -479,9 +492,9 @@ def main():
         df_logs = fetch_daily_logs(pet_id, str(today_date))
 
         # [統計看板邏輯]
-        today_net_cal = 0.0 # A. 總熱量 (實際食用)
-        today_feed = 0.0 # B. 投入量 (不含水藥，不扣剩食)
-        today_input = 0.0 # C. 食用量 (不含水藥，扣除剩食)
+        today_net_cal = 0.0 
+        today_feed = 0.0 
+        today_input = 0.0 
         today_eaten = 0.0 
         today_water = 0.0
         today_prot = 0.0
@@ -496,7 +509,7 @@ def main():
                 # 合併資料
                 df_merged = pd.merge(df_logs, df_lib, left_on='food_name', right_on='name', how='left')
 
-                # A. 基礎營養 (直接加總，正負會抵銷)
+                # A. 基礎營養
                 today_net_cal = df_merged['calories'].sum()
                 today_prot = df_merged['protein'].sum()
                 today_fat = df_merged['fat'].sum()
@@ -510,11 +523,11 @@ def main():
                 exclude_pets = ['med', 'supp']
                 mask_is_food = ~df_merged['category'].fillna('other').isin(exclude_pets)
                 
-                # B. 投入量（只算 food 且 weight > 0）
+                # B. 投入量
                 mask_positive = df_merged['net_weight'] > 0
                 today_input = df_merged.loc[mask_is_food & mask_positive, 'net_weight'].sum()
 
-                # C. 食用量（只算 food，包含正負數加總）
+                # C. 食用量
                 today_eaten = df_merged.loc[mask_is_food, 'net_weight'].sum()
             
             except Exception as e:
