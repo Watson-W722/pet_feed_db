@@ -316,7 +316,7 @@ def render_sidebar():
         tags = current_pet_data.get('health_tags') or []
         desc = current_pet_data.get('health_desc') or ""
         status_text = ", ".join(tags)
-        if desc: status_text += f"({desc})"
+        if desc: status_text += f" ({desc})"
         if not status_text: status_text = "未設定"
 
         st.sidebar.markdown(f"""
@@ -326,103 +326,108 @@ def render_sidebar():
         - ⚖️ **體重**: {current_pet_data.get('weight', 0)} kg
         - 🏥 **狀況**: {status_text}
         """)
+        st.sidebar.divider()
 
-    # --- [修改] 編輯/新增區塊 (移到上方，並移除 st.form 以修復裁切功能)  ---
+    # --- [修改] 編輯/新增區塊 (移到上方，並移除 st.form 以修復裁切功能) ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
     with st.sidebar.expander(expander_title, expanded=(selected_pet_name == "➕ 新增寵物")):
-       # 注意：這裡移除了 with st.form... 這樣圖片上傳後才能即時顯示裁切框
-        # with st.form("pet_form"):
+        
+        # 注意：這裡移除了 with st.form... 這樣圖片上傳後才能即時顯示裁切框
+        
         p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
         default_date = date.today()
         if current_pet_data.get('birth_date'):
-            try:
-                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+            try: default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
             except: pass
 
-            p_bday = st.date_input("生日", value=default_date)
-            p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
-            p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-            p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
+        p_bday = st.date_input("生日", value=default_date)
+        p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
+        p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
+        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
 
-            current_tags = current_pet_data.get('health_tags') or []
-            valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
+        current_tags = current_pet_data.get('health_tags') or []
+        valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
 
-            p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
-            p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
+        p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
+        p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
 
-            # === 圖片裁切區 ===
-            st.markdown("---")
-            st.write("📷 上傳與裁切大頭照")
-            p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="pet_img_uploader")
+        # === 圖片裁切區 ===
+        st.markdown("---")
+        st.write("📷 上傳與裁切大頭照")
+        p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="pet_img_uploader")
 
-            cropped_img_base64 = None
+        cropped_img_base64 = None
 
-            if p_img_file:
-                st.info("👇 請在下方圖片上拖拉，選取要裁切的範圍")
-                img_to_crop = Image.open(p_img_file)
-                img_to_crop = ImageOps.exif_transpose(img_to_crop)
-                # 因為移除了 form，這裡會即時顯示裁切器
-                cropped_img = st_cropper(img_to_crop, aspect_ratio=(1,1), box_color='#0000FF', should_resize_image=True)
-                st.caption("預覽結果：")
-                st.image(cropped_img, width=100)
-                cropped_img_base64 = pil_image_to_base64(cropped_img)
+        if p_img_file:
+            st.info("👇 請在下方圖片上拖拉，選取要裁切的範圍")
+            img_to_crop = Image.open(p_img_file)
+            img_to_crop = ImageOps.exif_transpose(img_to_crop)
             
-            # 這裡改用一般的 button，而非 form_submit_button
-            if st.button("💾 儲存設定", type="primary"):
-                final_img_str = current_pet_data.get('image_data') 
-                if p_img_file and cropped_img_base64: 
-                    final_img_str = cropped_img_base64
+            # 因為移除了 form，這裡會即時顯示裁切器
+            cropped_img = st_cropper(
+                img_to_crop, 
+                aspect_ratio=(1,1), 
+                box_color='#0000FF', 
+                should_resize_image=True
+            )
+            
+            st.caption("預覽結果：")
+            st.image(cropped_img, width=100)
+            cropped_img_base64 = pil_image_to_base64(cropped_img)
 
-                pet_payload = {
-                    "name": p_name,
-                    "birth_date": str(p_bday),
-                    "gender": p_gender,
-                    "breed": p_breed,
-                    "weight": p_weight,
-                    "health_tags": p_tags,
-                    "health_desc": p_desc,
-                    "image_data": final_img_str
-                }
+        # 這裡改用一般的 button，而非 form_submit_button
+        if st.button("💾 儲存設定", type="primary"):
+            final_img_str = current_pet_data.get('image_data') 
+            if p_img_file and cropped_img_base64: 
+                final_img_str = cropped_img_base64
 
-                if selected_pet_name != "➕ 新增寵物":
-                    save_pet(pet_payload, current_pet_data['id'])
-                    st.toast("資料已更新!")
-                else:
-                    save_pet(pet_payload)
-                    st.toast("新寵物已建立!")
-                time.sleep(1)
-                st.rerun()
-    
-        # === [新增] 智慧刪除區塊 ===
+            pet_payload = {
+                "name": p_name,
+                "birth_date": str(p_bday),
+                "gender": p_gender,
+                "breed": p_breed,
+                "weight": p_weight,
+                "health_tags": p_tags,
+                "health_desc": p_desc,
+                "image_data": final_img_str
+            }
+
+            if selected_pet_name != "➕ 新增寵物":
+                save_pet(pet_payload, current_pet_data['id'])
+                st.toast("資料已更新!")
+            else:
+                save_pet(pet_payload)
+                st.toast("新寵物已建立!")
+            time.sleep(1)
+            st.rerun()
+
+    # --- [修改] 刪除區塊 (移到下方，並改名) ---
     if selected_pet_name != "➕ 新增寵物":
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
-            # 1. 先檢查有沒有資料
             has_data = check_pet_has_data(current_pet_data['id'])
 
-        if has_data:
-            # A. 有資料 -> 走軟刪除流程
-            st.info("💡 系統偵測此寵物已有紀錄。")
-            st.warning("將採用「封存」方式，資料不會真正消失。")
-            del_reason = st.text_input("請輸入刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、誤建檔...")
+            if has_data:
+                st.info("💡 系統偵測此寵物已有紀錄。")
+                st.warning("將採用「封存」方式，資料不會真正消失。")
+                del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：誤建檔...")
 
-            if st.button("確認封存", type="primary", key="btn_soft_del"):
-                if not del_reason.strip():
-                    st.error("請填寫原因！")
-                else:
-                    if soft_delete_pet(current_pet_data['id', del_reason]):
-                        st.toast(f"已封存 {selected_pet_name}")
-                        time.sleep(1)
-                        st.rerun
+                if st.button("確認封存", type="secondary", key="btn_soft_del"):
+                    if not del_reason.strip():
+                        st.error("請填寫原因！")
+                    else:
+                        if soft_delete_pet(current_pet_data['id'], del_reason):
+                            st.toast(f"已封存 {selected_pet_name}")
+                            time.sleep(1)
+                            st.rerun()
             else:
                 st.info("無紀錄，可直接刪除。")
                 if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
                     if hard_delete_pet(current_pet_data['id']):
                         st.toast(f"已刪除 {selected_pet_name}")
-                        time.slee(1)
-                        st.rerun()                         
-
+                        time.sleep(1)
+                        st.rerun()
     
     return current_pet_data
 
