@@ -422,8 +422,9 @@ def render_sidebar():
                             time.sleep(1)
                             st.rerun()
             else:
-                st.info("無紀錄，可直接刪除。")
+                sst.info("無紀錄，可直接刪除。")
                 if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
+                    # [修正] 這一行後面要記得加冒號 :
                     if hard_delete_pet(current_pet_data['id']):
                         st.toast(f"已刪除 {selected_pet_name}")
                         time.sleep(1)
