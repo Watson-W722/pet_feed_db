@@ -318,9 +318,13 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- 編輯/新增寵物表單 (在上方) ---
+    # --- 編輯/新增寵物表單 (在上方)(使用 session_state 控制收合)  ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
-    with st.sidebar.expander(expander_title, expanded=(selected_pet_name == "➕ 新增寵物")):
+
+    # 判斷是否要自動展開：如果是新增模式，或是剛剛按了編輯
+    is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
+
+    with st.sidebar.expander(expander_title, expanded=is_expanded):
         p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
         default_date = date.today()
@@ -351,13 +355,20 @@ def render_sidebar():
             st.caption("請在下方拖拉藍色框框選擇範圍：")
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
-            
-            cropped_img = st_cropper(
-                img_to_crop, 
-                aspect_ratio=(1,1), 
-                box_color='#0000FF', 
-                should_resize_image=True
-            )
+
+            # [修正重點 1 & 2]：
+            # 1. realtime_update=False (解決滑鼠亂跳)
+            # 2. 用 col_crop 限制寬度 (解決圖片太大)
+            col_crop, _ = st.columns([0.8, 0.2])
+
+            with col_crop:            
+                cropped_img = st_cropper(
+                    img_to_crop, 
+                    aspect_ratio=(1,1), 
+                    box_color='#0000FF', 
+                    should_resize_image=True,
+                    realtime_update=False # 關鍵修正！
+                )
             
             st.caption("預覽結果：")
             st.image(cropped_img, width=100)
@@ -386,6 +397,9 @@ def render_sidebar():
             else:
                 save_pet(pet_payload)
                 st.toast("新寵物已建立!")
+            
+            # 儲存成功後，設定旗標讓選單收合，並重整頁面
+            st.session_state.expand_edi = False
             time.sleep(1)
             st.rerun()
 
@@ -453,8 +467,17 @@ def main():
     c_logo, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
     with c_logo:
-        try: st.image("logo.png", width=80)
-        except: st.header("🐱")
+        # 預設顯示 Logo
+        img_to_show = "logo.png"
+
+        # 如果寵物有大頭貼，就換成大頭貼 (Base64)
+        if current_pet.get('image_data'):
+            img_to_show = f"data:image/jpeg;base64, {current_pet['image_data']}"
+        
+        try: 
+            st.image("logo.png", width=80)
+        except: 
+            st.header("🐱")
     
     with c_title:
         st.markdown(f"<h1 style='padding-top: 0px;'>{pet_name} 的飲食日記</h1>", unsafe_allow_html=True)
