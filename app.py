@@ -357,22 +357,29 @@ def render_sidebar():
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
             
-            # [縮圖與設定]
-            img_to_crop.thumbnail((250, 250)) 
+            # [修正 1] 不要縮太小，保留一點畫質 (設為 600px)，避免座標誤差
+            # 這樣裁切出來的大頭貼也會比較清楚
+            if img_to_crop.width > 600:
+                img_to_crop.thumbnail((600,600)) 
             
-            # 顯示裁切器 (限制寬度)
-            col_crop, _ = st.columns([0.8, 0.2])
+            # [修正 2] 透過 st.columns 限制「顯示寬度」，而不是限制「圖片寬度」
+            # 這樣視覺上不會太大，但裁切邏輯是正常的
+            col_crop, _ = st.columns([0.9, 0.1])
             with col_crop:
                 cropped_img = st_cropper(
                     img_to_crop, 
                     aspect_ratio=(1,1), 
                     box_color='#0000FF', 
-                    should_resize_image=False,
-                    realtime_update=False
+                    # [關鍵修正] 設為 True，讓套件自己去計算縮放比例，才不會跑位
+                    should_resize_image=True,
+                    # 保持 False，避免藍框亂跳，記得提醒使用者「放開滑鼠」
+                    realtime_update=False,
+                    # [新增] 加上 key，確保狀態唯一
+                    key="pet_cropper"
                 )
             
             st.caption("預覽結果：")
-            st.image(cropped_img, width=100)
+            st.image(cropped_img, width=150)
             
             cropped_img_base64 = pil_image_to_base64(cropped_img)
 
