@@ -462,7 +462,7 @@ def main():
     with c_date:
         today_date = st.date_input("紀錄日期", date.today(), label_visibility="collapsed")
 
-    tab1, tab2, tab3 = st.tabs(["📝 紀錄飲食", "📊 數據與匯出", "🍎 食物資料庫管理"])
+    tab1, tab2, tab3 = st.tabs(["📝 紀錄飲食", "🍎 食物資料庫管理", "📊 數據與匯出" ])
 
     # --- Tab 1: 紀錄飲食 ---
     with tab1:
@@ -625,18 +625,6 @@ def main():
             show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
             st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-    # --- Tab 2: 匯出 ---
-    with tab2:
-        st.subheader("📥 資料匯出")
-        if st.button("準備匯出 CSV"):
-            with st.spinner("讀取中..."):
-                df_exp = fetch_all_logs_for_export(pet_id)
-            if not df_exp.empty:
-                df_exp = df_exp.rename(columns={'date_str':'日期','meal_name':'餐別','food_name':'食物','net_weight':'淨重','calories':'熱量'})
-                csv = df_exp.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
-            else: st.info("無資料")
-
     # --- Tab 3: 食物管理 ---
     with tab3:
         st.markdown("#### 1. 新增食物")
@@ -723,6 +711,19 @@ def main():
                     for i in to_del:
                         supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
                 st.toast("已更新"); time.sleep(1); st.rerun()
+
+    # --- Tab 2: 匯出 ---
+    with tab2:
+        st.subheader("📥 資料匯出")
+        if st.button("準備匯出 CSV"):
+            with st.spinner("讀取中..."):
+                df_exp = fetch_all_logs_for_export(pet_id)
+            if not df_exp.empty:
+                df_exp = df_exp.rename(columns={'date_str':'日期','meal_name':'餐別','food_name':'食物','net_weight':'淨重','calories':'熱量'})
+                csv = df_exp.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
+            else: st.info("無資料")
+
 
 if __name__ == "__main__":
     main()
