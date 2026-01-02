@@ -332,7 +332,7 @@ def render_sidebar():
         p_bday = st.date_input("生日", value=default_date)
         p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
         p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
+        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
 
         current_tags = current_pet_data.get('health_tags') or []
         valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
