@@ -327,55 +327,23 @@ def render_sidebar():
         - 🏥 **狀況**: {status_text}
         """)
 
-        # === [新增] 智慧刪除區塊 ===
-        with st.sidebar.expander("🗑️ 刪除 / 封存此寵物", expanded=False):
-            # 1. 先檢查有沒有資料
-            has_data = check_pet_has_data(current_pet_data['id'])
+    # --- [修改] 編輯/新增區塊 (移到上方，並移除 st.form 以修復裁切功能)  ---
+    expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
+    with st.sidebar.expander(expander_title, expanded=(selected_pet_name == "➕ 新增寵物")):
+       # 注意：這裡移除了 with st.form... 這樣圖片上傳後才能即時顯示裁切框
+        # with st.form("pet_form"):
+        p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
-            if has_data:
-                # A. 有資料 -> 走軟刪除流程
-                st.info("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
-                st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式，資料不會真正消失，但在選單中將不再顯示。")
-
-                # 輸入原因
-                del_reason = st.text_input("請輸入刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養、誤建檔...")
-
-                if st.button("確認封存", type="primary", key="btn_soft_del"):
-                    if not del_reason.strip():
-                        st.error("請填寫原因才能刪除喔！")
-                    else:
-                        # [修正] 括號位置修正
-                        if soft_delete_pet(current_pet_data['id'], del_reason):
-                            st.toast(f"已封存 {selected_pet_name}")
-                            time.sleep(1)
-                            st.rerun()
-            else:
-                # B. 沒資料 -> 走硬刪除流程
-                st.info("此寵物尚無任何紀錄，可直接刪除。")
-                if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
-                    if hard_delete_pet(current_pet_data['id']):
-                        st.toast(f"已永久刪除 {selected_pet_name}")
-                        time.sleep(1)
-                        # [修正] 補上括號
-                        st.rerun()
-        
-        st.sidebar.divider()
-
-    # --- 編輯/新增寵物表單 ---
-    with st.sidebar.expander(f"{'新增' if selected_pet_name == '➕ 新增寵物' else '編輯'} 資料"):
-        with st.form("pet_form"):
-            p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
-
-            default_date = date.today()
-            if current_pet_data.get('birth_date'):
-                try:
-                    default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
-                except: pass
+        default_date = date.today()
+        if current_pet_data.get('birth_date'):
+            try:
+                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+            except: pass
 
             p_bday = st.date_input("生日", value=default_date)
             p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
             p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-            p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
+            p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
 
             current_tags = current_pet_data.get('health_tags') or []
             valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
@@ -386,20 +354,22 @@ def render_sidebar():
             # === 圖片裁切區 ===
             st.markdown("---")
             st.write("📷 上傳與裁切大頭照")
-            p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'])
+            p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="pet_img_uploader")
 
             cropped_img_base64 = None
 
             if p_img_file:
-                st.caption("請在下方拖拉藍色框框選擇範圍：")
+                st.info("👇 請在下方圖片上拖拉，選取要裁切的範圍")
                 img_to_crop = Image.open(p_img_file)
                 img_to_crop = ImageOps.exif_transpose(img_to_crop)
+                # 因為移除了 form，這裡會即時顯示裁切器
                 cropped_img = st_cropper(img_to_crop, aspect_ratio=(1,1), box_color='#0000FF', should_resize_image=True)
                 st.caption("預覽結果：")
                 st.image(cropped_img, width=100)
                 cropped_img_base64 = pil_image_to_base64(cropped_img)
-
-            if st.form_submit_button("💾 儲存設定"):
+            
+            # 這裡改用一般的 button，而非 form_submit_button
+            if st.button("💾 儲存設定", type="primary"):
                 final_img_str = current_pet_data.get('image_data') 
                 if p_img_file and cropped_img_base64: 
                     final_img_str = cropped_img_base64
@@ -423,6 +393,39 @@ def render_sidebar():
                     st.toast("新寵物已建立!")
                 time.sleep(1)
                 st.rerun()
+    
+    return current_pet_data
+
+
+        # === [新增] 智慧刪除區塊 ===
+    if selected_pet_name != "➕ 新增寵物":
+        st.sidebar.markdown("---")
+        with st.sidebar.expander("🗑️ 刪除", expanded=False):
+            # 1. 先檢查有沒有資料
+            has_data = check_pet_has_data(current_pet_data['id'])
+
+        if has_data:
+            # A. 有資料 -> 走軟刪除流程
+            st.info("💡 系統偵測此寵物已有紀錄。")
+            st.warning("將採用「封存」方式，資料不會真正消失。")
+            del_reason = st.text_input("請輸入刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、誤建檔...")
+
+            if st.button("確認封存", type="primary", key="btn_soft_del"):
+                if not del_reason.strip():
+                    st.error("請填寫原因！")
+                else:
+                    if soft_delete_pet(current_pet_data['id', del_reason]):
+                        st.toast(f"已封存 {selected_pet_name}")
+                        time.sleep(1)
+                        st.rerun
+            else:
+                st.info("無紀錄，可直接刪除。")
+                if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
+                    if hard_delete_pet
+                if soft_delete_pet(current_pet_data['id'], del_reason):
+                    st.toast(f"已封存 {selected_pet_name}")
+                    time.sleep(1)
+                    st.rerun()
     
     return current_pet_data
 
