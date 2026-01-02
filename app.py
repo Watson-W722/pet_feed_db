@@ -297,6 +297,54 @@ def get_last_meal_density(pet_id):
 # 4. 畫面渲染函式 (UI Components)
 # ==========================================
 
+# [新增] 彈出式裁切視窗
+@st.dialog("📷 更換大頭照")
+def open_crop_dialog(current_pet_data, pet_id):
+    st.write("請上傳圖片並選取範圍：")
+    
+    # 檔案上傳
+    p_img_file = st.file_uploader("", type=['jpg', 'png', 'jpeg'], key="dialog_uploader")
+    
+    if p_img_file:
+        img_to_crop = Image.open(p_img_file)
+        img_to_crop = ImageOps.exif_transpose(img_to_crop)
+        
+        # 建立兩欄：左邊裁切，右邊預覽
+        c_crop, c_prev = st.columns([2, 1])
+        
+        with c_crop:
+            st.caption("👇 拖拉藍框")
+            # 在彈出視窗中，我們可以開啟即時更新 (realtime_update=True)
+            # 因為這裡干擾較少，比較不會亂跳
+            cropped_img = st_cropper(
+                img_to_crop,
+                aspect_ratio=(1, 1),
+                box_color='#0000FF',
+                should_resize_image=True,
+                realtime_update=True, # 改回 True，讓預覽跟著動！
+                key="dialog_cropper"
+            )
+            
+        with c_prev:
+            st.caption("預覽結果")
+            st.image(cropped_img, width=150)
+            
+        st.divider()
+        
+        if st.button("確認使用這張照片", type="primary", use_container_width=True):
+            # 轉檔並存檔
+            base64_str = pil_image_to_base64(cropped_img)
+            
+            # 更新資料庫
+            supabase.table('pets').update({
+                "image_data": base64_str
+            }).eq('id', pet_id).execute()
+            
+            st.toast("✅ 照片已更新！")
+            st.cache_data.clear()
+            time.sleep(1)
+            st.rerun()
+
 def render_sidebar():
     st.sidebar.title("🐾 寵物管理")
 
@@ -317,12 +365,17 @@ def render_sidebar():
     if selected_pet_name != "➕ 新增寵物":
         current_pet_data = pet_map[selected_pet_name]
 
+        # [修改] 圖片顯示區塊
         if current_pet_data.get('image_data'):
             try:
                 img_src = f"data:image/jpeg;base64,{current_pet_data['image_data']}"
                 st.sidebar.image(img_src, width=150, caption=selected_pet_name)
             except: pass
         
+        # [新增] 呼叫彈出視窗的按鈕
+        if st.sidebar.button("📷 更換大頭照", use_container_width=True):
+            open_crop_dialog(current_pet_data, current_pet_data['id'])
+
         age_str = calculate_age(current_pet_data.get('birth_date'))
         tags = current_pet_data.get('health_tags') or []
         desc = current_pet_data.get('health_desc') or ""
@@ -339,122 +392,85 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- 編輯/新增寵物表單 (在上方)(使用 session_state 控制收合)  ---
-    expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
-
-    # 判斷是否要自動展開：如果是新增模式，或是剛剛按了編輯
+    # --- 編輯/新增區塊 (移除圖片上傳，只留基本資料) ---
+    expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯基本資料"
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
-
+    
     with st.sidebar.expander(expander_title, expanded=is_expanded):
-        p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
+        # 這裡改回使用 form，讓體驗更好 (因為不需要即時裁切了)
+        with st.form("pet_basic_info"):
+            p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
-        default_date = date.today()
-        if current_pet_data.get('birth_date'):
-            try:
-                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
-            except: pass
+            default_date = date.today()
+            if current_pet_data.get('birth_date'):
+                try: default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+                except: pass
 
-        p_bday = st.date_input("生日", value=default_date)
-        p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
-        p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
+            p_bday = st.date_input("生日", value=default_date)
+            p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
+            p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
+            p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
 
-        current_tags = current_pet_data.get('health_tags') or []
-        valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
+            current_tags = current_pet_data.get('health_tags') or []
+            valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
 
-        p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
-        p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
-
-        # === 圖片裁切區 ===
-        st.markdown("---")
-        st.write("📷 上傳與裁切大頭照")
-        p_img_file = st.file_uploader("上傳圖片 (JPG/PNG)", type=['jpg', 'png', 'jpeg'], key="pet_img_uploader")
-
-        cropped_img_base64 = None
-
-        if p_img_file:
-            st.caption("👇 請在圖片上拖拉藍框 (預覽圖在下方)")
-            img_to_crop = Image.open(p_img_file)
-            img_to_crop = ImageOps.exif_transpose(img_to_crop)
-
-            # [縮圖與設定] 避免過大
-            img_to_crop.thumbnail((600, 600))
+            p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
+            p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
             
-            # 顯示裁切器 (限制寬度)
-            col_crop, _ = st.columns([0.9, 0.1])
-            with col_crop:
-                cropped_img = st_cropper(
-                    img_to_crop, 
-                    aspect_ratio=(1,1), 
-                    box_color='#0000FF', 
-                    should_resize_image=True,
-                    realtime_update=False, # 防止藍框亂跳
-                    key="pet_cropper"
-                )
+            # [注意] 如果是「新增模式」，還是要在這裡提供上傳圖片，不然新寵物會沒照片
+            # 但為了簡化，新寵物可以先不傳照片，建好後再按「更換大頭照」
+            # 這裡我們只處理文字資料
             
-            st.caption("預覽結果：")
-            st.image(cropped_img, width=150)
-            
-            cropped_img_base64 = pil_image_to_base64(cropped_img)
+            if st.form_submit_button("💾 儲存資料"):
+                # 這裡只更新文字資料，保留原本的 image_data
+                final_img_str = current_pet_data.get('image_data') 
 
-        # 儲存按鈕
-        if st.button("💾 儲存設定", type="primary"):
-            final_img_str = current_pet_data.get('image_data') 
-            if p_img_file and cropped_img_base64: 
-                final_img_str = cropped_img_base64
+                pet_payload = {
+                    "name": p_name,
+                    "birth_date": str(p_bday),
+                    "gender": p_gender,
+                    "breed": p_breed,
+                    "weight": p_weight,
+                    "health_tags": p_tags,
+                    "health_desc": p_desc,
+                    "image_data": final_img_str # 維持原圖
+                }
 
-            pet_payload = {
-                "name": p_name,
-                "birth_date": str(p_bday),
-                "gender": p_gender,
-                "breed": p_breed,
-                "weight": p_weight,
-                "health_tags": p_tags,
-                "health_desc": p_desc,
-                "image_data": final_img_str
-            }
+                if selected_pet_name != "➕ 新增寵物":
+                    save_pet(pet_payload, current_pet_data['id'])
+                    st.toast("資料已更新!")
+                else:
+                    save_pet(pet_payload)
+                    st.toast("新寵物已建立! 請點擊「更換大頭照」上傳照片。")
+                
+                st.session_state.expand_edit = False 
+                time.sleep(1)
+                st.rerun()
 
-            if selected_pet_name != "➕ 新增寵物":
-                save_pet(pet_payload, current_pet_data['id'])
-                st.toast("資料已更新!")
-            else:
-                save_pet(pet_payload)
-                st.toast("新寵物已建立!")
-            
-            # 儲存成功後，設定旗標讓選單收合，並重整頁面
-            st.session_state.expand_edit = False
-            time.sleep(1)
-            st.rerun()
-
-    # === [修正] 刪除區塊 (移到下方，且修正語法錯誤) ===
+    # === 刪除區塊 ===
     if selected_pet_name != "➕ 新增寵物":
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
             has_data = check_pet_has_data(current_pet_data['id'])
 
             if has_data:
-                # A. 有資料 -> 走軟刪除流程
-                st.info("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
-                st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式。")
+                st.info("💡 系統偵測此寵物已有紀錄。")
+                st.warning("將採用「封存 (註記刪除)」方式。")
+                del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料...")
 
-                del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養...")
-
-                if st.button("確認封存", type="secondary", key="btn_soft_del"):
+                if st.button("確認封存", type="secondary"):
                     if not del_reason.strip():
                         st.error("請填寫原因！")
                     else:
-                        # [修正] 括號與逗號位置
                         if soft_delete_pet(current_pet_data['id'], del_reason):
                             st.toast(f"已封存 {selected_pet_name}")
                             time.sleep(1)
                             st.rerun()
             else:
-                # [修正] st.info 拼寫錯誤
                 st.info("無紀錄，可直接刪除。")
-                if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
-                    # [修正] 補上冒號
+                if st.button("確認永久刪除", type="primary"):
                     if hard_delete_pet(current_pet_data['id']):
-                        st.toast(f"已永久刪除 {selected_pet_name}")
+                        st.toast(f"已刪除 {selected_pet_name}")
                         time.sleep(1)
                         st.rerun()
     
