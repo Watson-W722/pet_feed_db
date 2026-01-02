@@ -394,9 +394,6 @@ def render_sidebar():
                 time.sleep(1)
                 st.rerun()
     
-    return current_pet_data
-
-
         # === [新增] 智慧刪除區塊 ===
     if selected_pet_name != "➕ 新增寵物":
         st.sidebar.markdown("---")
@@ -421,11 +418,11 @@ def render_sidebar():
             else:
                 st.info("無紀錄，可直接刪除。")
                 if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
-                    if hard_delete_pet
-                if soft_delete_pet(current_pet_data['id'], del_reason):
-                    st.toast(f"已封存 {selected_pet_name}")
-                    time.sleep(1)
-                    st.rerun()
+                    if hard_delete_pet(current_pet_data['id']):
+                        st.toast(f"已刪除 {selected_pet_name}")
+                        time.slee(1)
+                        st.rerun()                         
+
     
     return current_pet_data
 
