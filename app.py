@@ -48,6 +48,10 @@ FOOD_CATEGORIES_CODE = ["wet_food", "dry_food", "snack", "other"]
 # 健康狀況選項
 HEALTH_OPTIONS = ["健康", "腎貓", "胰貓", "糖貓", "其它"]
 
+# 初始化 Session State (用於控制編輯區收合)
+if 'expand_edit' not in st.session_state:
+    st.session_state.expand_edit = False
+
 # ==========================================
 # 2. 資料庫連線 (Database Connection)
 # ==========================================
@@ -71,6 +75,10 @@ supabase = init_supabase()
 def pil_image_to_base64(image):
     """將 PIL 圖片物件轉為 Base64 字串 (給裁切器用)"""
     try:
+        # [修正] 確保轉換為 RGB 模式
+        if image.mode in ("RGBA", "P"):
+            image = image.convert("RGB")
+            
         image.thumbnail((300, 300))
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=80)
@@ -86,10 +94,9 @@ def save_pet(data_dict, pet_id=None):
         supabase.table('pets').insert(data_dict).execute()
     st.cache_data.clear()
 
-# --- 寵物相關 ---
+# --- 寵物相關 --- 
 def fetch_pets():
     try:
-        # 只抓 is_deleted 為 false (或是 null) 的寵物
         response = supabase.table('pets').select("*")\
             .neq('is_deleted', True)\
             .order('created_at').execute()
@@ -97,22 +104,18 @@ def fetch_pets():
     except Exception as e:
         return pd.DataFrame()      
 
-# 檢查寵物是否有關聯資料 (點餐本 或 飲食紀錄)
+# 檢查寵物是否有關聯資料
 def check_pet_has_data(pet_id):
     try:
-        # 檢查點餐本
         res_menu = supabase.table('pet_food_relations').select("id", count='exact').eq('pet_id', pet_id).execute() 
         count_menu = res_menu.count if res_menu.count is not None else len(res_menu.data)
-
-        # 檢查飲食紀錄
         res_logs = supabase.table('diet_logs').select("id", count='exact').eq('pet_id', pet_id).execute()
         count_logs = res_logs.count if res_logs.count is not None else len(res_logs.data)
-
         return (count_menu + count_logs) > 0
     except:
         return False
 
-# 執行軟刪除 (註記刪除)
+# 軟刪除
 def soft_delete_pet(pet_id, reason):
     try:
         supabase.table('pets').update({
@@ -125,7 +128,7 @@ def soft_delete_pet(pet_id, reason):
         st.error(f"軟刪除失敗: {e}")
         return False
 
-# 執行硬刪除 (直接消失)
+# 硬刪除
 def hard_delete_pet(pet_id):
     try:
         supabase.table('pets').delete().eq('id', pet_id).execute()
@@ -318,25 +321,23 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- 編輯/新增寵物表單 (在上方)(使用 session_state 控制收合)  ---
+    # --- 編輯/新增區塊 (使用 session_state 控制收合) ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯資料"
-
-    # 判斷是否要自動展開：如果是新增模式，或是剛剛按了編輯
+    
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
-
+    
     with st.sidebar.expander(expander_title, expanded=is_expanded):
         p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
         default_date = date.today()
         if current_pet_data.get('birth_date'):
-            try:
-                default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
+            try: default_date = datetime.strptime(str(current_pet_data['birth_date']), "%Y-%m-%d").date()
             except: pass
 
         p_bday = st.date_input("生日", value=default_date)
         p_gender = st.selectbox("性別", ["公", "母"], index=0 if current_pet_data.get('gender') == '公' else 1)
         p_breed = st.text_input("品種", value=current_pet_data.get('breed', '米克斯'))
-        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 2.0)), step=0.1)
+        p_weight = st.number_input("體重 (kg)", value=float(current_pet_data.get('weight', 4.0)), step=0.1)
 
         current_tags = current_pet_data.get('health_tags') or []
         valid_defaults = [t for t in current_tags if t in HEALTH_OPTIONS]
@@ -355,23 +356,24 @@ def render_sidebar():
             st.caption("👇 請在圖片上拖拉藍框 (預覽圖在下方)")
             img_to_crop = Image.open(p_img_file)
             img_to_crop = ImageOps.exif_transpose(img_to_crop)
-
-            # [修正重點]：在送給 cropper 之前先縮小，避免佔滿畫面
-            # 這樣使用者不用捲動就能同時看到「操作區」和「預覽區」
-            img_to_crop.thumbnail((250,250))
             
-            # 顯示裁切器
-            cropped_img = st_cropper(
-                img_to_crop, 
-                aspect_ratio=(1,1), 
-                box_color='#0000FF', 
-                should_resize_image=False, # 因為我們上面已經自己縮過了
-                realtime_update=True 
-            )
-
-           # 小預覽圖
+            # [縮圖與設定]
+            img_to_crop.thumbnail((250, 250)) 
+            
+            # 顯示裁切器 (限制寬度)
+            col_crop, _ = st.columns([0.8, 0.2])
+            with col_crop:
+                cropped_img = st_cropper(
+                    img_to_crop, 
+                    aspect_ratio=(1,1), 
+                    box_color='#0000FF', 
+                    should_resize_image=False,
+                    realtime_update=False
+                )
+            
             st.caption("預覽結果：")
             st.image(cropped_img, width=100)
+            
             cropped_img_base64 = pil_image_to_base64(cropped_img)
 
         # 儲存按鈕
@@ -398,39 +400,33 @@ def render_sidebar():
                 save_pet(pet_payload)
                 st.toast("新寵物已建立!")
             
-            # 儲存成功後，設定旗標讓選單收合，並重整頁面
-            st.session_state.expand_edi = False
+            # 收合並重整
+            st.session_state.expand_edit = False 
             time.sleep(1)
             st.rerun()
 
-    # === [修正] 刪除區塊 (移到下方，且修正語法錯誤) ===
+    # === 刪除區塊 ===
     if selected_pet_name != "➕ 新增寵物":
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
             has_data = check_pet_has_data(current_pet_data['id'])
 
             if has_data:
-                # A. 有資料 -> 走軟刪除流程
-                st.info("💡 系統偵測到這位毛孩已有「飲食紀錄」或「點餐本」資料。")
-                st.warning("為保留歷史數據，將採用「封存 (註記刪除)」方式。")
-
+                st.info("💡 系統偵測此寵物已有紀錄。")
+                st.warning("將採用「封存 (註記刪除)」方式，資料不會真正消失。")
                 del_reason = st.text_input("刪除原因 (必填)", max_chars=50, placeholder="例如：測試資料、送養...")
 
                 if st.button("確認封存", type="secondary", key="btn_soft_del"):
                     if not del_reason.strip():
                         st.error("請填寫原因！")
                     else:
-                        # [修正] 括號與逗號位置
                         if soft_delete_pet(current_pet_data['id'], del_reason):
                             st.toast(f"已封存 {selected_pet_name}")
                             time.sleep(1)
                             st.rerun()
             else:
-                # B. 沒資料 -> 走硬刪除流程
-                # [修正] st.info 拼寫錯誤
-                st.info("此寵物尚無任何紀錄，可直接刪除。")
+                st.info("無紀錄，可直接刪除。")
                 if st.button("確認永久刪除", type="primary", key="btn_hard_del"):
-                    # [修正] 補上冒號
                     if hard_delete_pet(current_pet_data['id']):
                         st.toast(f"已永久刪除 {selected_pet_name}")
                         time.sleep(1)
@@ -451,7 +447,6 @@ def main():
     if not current_pet:
         st.info("👈 請先在側邊欄新增寵物資料，才能開始使用喔！")
         
-        # --- [修改] 歡迎畫面 ---
         col1, col2 = st.columns([0.5, 4])
         with col1:
             try: st.image("logo.png", width=80)
@@ -463,23 +458,16 @@ def main():
     pet_id = current_pet['id']
     pet_name = current_pet['name']
 
-    # --- [修改] 主畫面標題 ---
+    # --- 主畫面標題 (修改：有照片顯示照片) ---
     c_logo, c_title, _, c_date = st.columns([0.5, 4, 0.5, 2])
 
     with c_logo:
-        # 預設顯示 Logo
         img_to_show = "logo.png"
-        is_custom_img = False
-
-        # 如果寵物有大頭貼，就換成大頭貼 (Base64)
         if current_pet.get('image_data'):
-            img_to_show = f"data:image/jpeg;base64, {current_pet['image_data']}"
-            is_custom_img = True
-        
-        try: 
-            st.image("logo.png", width=80)
-        except: 
-            st.header("🐱")
+            img_to_show = f"data:image/jpeg;base64,{current_pet['image_data']}"
+            
+        try: st.image(img_to_show, width=80)
+        except: st.header("🐱")
     
     with c_title:
         st.markdown(f"<h1 style='padding-top: 0px;'>{pet_name} 的飲食日記</h1>", unsafe_allow_html=True)
@@ -487,13 +475,13 @@ def main():
     with c_date:
         today_date = st.date_input("紀錄日期", date.today(), label_visibility="collapsed")
 
+    # [修正] Tab 順序修正 (Tab 2: 食物資料庫管理, Tab 3: 數據與匯出)
     tab1, tab2, tab3 = st.tabs(["📝 紀錄飲食", "🍎 食物資料庫管理", "📊 數據與匯出" ])
 
     # --- Tab 1: 紀錄飲食 ---
     with tab1:
         df_logs = fetch_daily_logs(pet_id, str(today_date))
 
-        # [統計看板邏輯]
         today_net_cal = 0.0 
         today_feed = 0.0 
         today_input = 0.0 
@@ -508,34 +496,26 @@ def main():
                 lib_res = supabase.table('food_library').select("name, category, moisture_pct").execute()
                 df_lib = pd.DataFrame(lib_res.data)
 
-                # 合併資料
                 df_merged = pd.merge(df_logs, df_lib, left_on='food_name', right_on='name', how='left')
 
-                # A. 基礎營養 (直接加總，正負會抵銷)
                 today_net_cal = df_merged['calories'].sum()
                 today_prot = df_merged['protein'].sum()
                 today_fat = df_merged['fat'].sum()
                 if 'phos' in df_merged.columns: today_phos = df_merged['phos'].sum()
 
-                # 計算水份
                 df_merged['calc_water'] = df_merged['net_weight'] * (df_merged['moisture_pct'].fillna(0)/100)
                 today_water = df_merged['calc_water'].sum()
 
-                # 定義食物類別
                 exclude_pets = ['med', 'supp']
                 mask_is_food = ~df_merged['category'].fillna('other').isin(exclude_pets)
                 
-                # B. 投入量
                 mask_positive = df_merged['net_weight'] > 0
                 today_input = df_merged.loc[mask_is_food & mask_positive, 'net_weight'].sum()
-
-                # C. 食用量
                 today_eaten = df_merged.loc[mask_is_food, 'net_weight'].sum()
             
             except Exception as e:
                 st.error(f"統計計算錯誤: {e}")
 
-        # 顯示看板
         st.markdown("##### 📊 今日營養統計")
         cols = st.columns(7)
         def fmt(val, unit=""):  return f"{val:.1f} {unit}" if val > 0 else "-"
@@ -550,16 +530,11 @@ def main():
 
         st.divider()
 
-        # 新增紀錄表單
         st.subheader("➕ 新增飲食 / 紀錄剩食")
-
-        # 1. 選擇類型
         type_cols = st.columns([1,4])
         record_type = type_cols[0].radio("類型", ["🥣 餵食", "🗑️ 剩食"], horizontal=True, label_visibility="collapsed")
         
-        # 2. 顯示對應表單
         if record_type == "🥣 餵食":
-            # --- 餵食模式 ---
             df_menu = fetch_pet_menu(pet_id)
             if df_menu.empty:
                 st.warning("點餐本是空的！請到「食物資料庫」新增。")
@@ -603,12 +578,9 @@ def main():
                             if save_log_entry([entry]):
                                 st.success("✅ 已紀錄"); time.sleep(0.5); st.rerun()
         else:
-            # --- 剩食模式 ---
             type_cols[1].info("系統將自動抓取「最近一餐」的平均營養密度進行扣除。")
-
             with st.container(border=True):
                 density_data = get_last_meal_density(pet_id)
-
                 if density_data:
                     info_text = density_data['info']
                     avg_cal = density_data['density_cal']
@@ -650,7 +622,7 @@ def main():
             show_df.columns = ['餐別', '品名', '重量', '熱量', '磷'][0:len(final_show)]
             st.dataframe(show_df, use_container_width=True, hide_index=True)
 
-    # --- Tab 2: 食物管理 ---
+    # --- [修正] Tab 2: 食物管理 (對應您原本的 tab2 功能) ---
     with tab2:
         st.markdown("#### 1. 新增食物")
         with st.expander("➕ 展開新增表單"):
@@ -737,7 +709,7 @@ def main():
                         supabase.table('pet_food_relations').delete().eq('pet_id', pet_id).eq('food_id', i).execute()
                 st.toast("已更新"); time.sleep(1); st.rerun()
 
-    # --- Tab 3: 匯出 ---
+    # --- [修正] Tab 3: 數據與匯出 (對應您原本的 tab3 功能) ---
     with tab3:
         st.subheader("📥 資料匯出")
         if st.button("準備匯出 CSV"):
