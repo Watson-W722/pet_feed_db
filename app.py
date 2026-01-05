@@ -249,7 +249,7 @@ def render_sidebar():
     pet_map = {}
 
     if not df_pets.empty:
-        existing_names = df_pets['name'].tolist()
+        existing_names = [n for n in df_pets['name'].tolist() if n and n.strip()]
         pet_names = existing_names + ["➕ 新增寵物"]
         for _, row in df_pets.iterrows():
             pet_map[row['name']] = row.to_dict()
@@ -257,10 +257,13 @@ def render_sidebar():
     selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
     current_pet_data = {}
 
-    # --- A. 顯示寵物資訊 (僅在選擇現有寵物時) ---
-    if selected_pet_name != "➕ 新增寵物":
-        current_pet_data = pet_map[selected_pet_name]
+    # --- A. 顯示寵物資訊 (修改判斷邏輯) ---
+    # 修正重點：必須有選名字、名字不是"新增"、且名字不是空白字串
+    is_valid_pet = selected_pet_name and selected_pet_name != "➕ 新增寵物" and selected_pet_name.strip() != ""
 
+    if is_valid_pet:
+        current_pet_data = pet_map.get(selected_pet_name,{}) # 加個 get 避免報錯
+ 
         # 顯示圖片
         if current_pet_data.get('image_data'):
             try:
@@ -316,7 +319,7 @@ def render_sidebar():
             # [修改] 這裡只處理文字儲存，不放圖片裁切
             btn_text = "💾 建立新寵物" if selected_pet_name == "➕ 新增寵物" else "💾 儲存修改"
             if st.form_submit_button(btn_text):
-                if not p_name:
+                if not p_name or not p_names.strip(): # 這裡也加強防呆，防止存入空白名字
                     st.error("請輸入名字！")
                 else:
                     pet_payload = {
@@ -347,7 +350,7 @@ def render_sidebar():
                         st.rerun()
 
     # === C. 刪除區塊 ===
-    if selected_pet_name != "➕ 新增寵物":
+    if is_valid_pet: # 使用同樣的嚴格判斷
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
             has_data = check_pet_has_data(current_pet_data['id'])
