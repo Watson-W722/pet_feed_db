@@ -84,19 +84,17 @@ def save_pet(data_dict, pet_id=None):
             return pet_id
         else:
             # 新增資料
-            # 確保 image_data 如果是 None 不會造成問題 (通常 Supabase 接受 null，但為了保險)
-            if 'image_data' in data_dict and data_dict['image_data'] is None:
-                del data_dict['image_data'] # 移除該鍵，讓資料庫用預設值或 NULL
+            # [修正 2] 移除 .select()，直接 .execute() 即可
+            res = supabase.table('pets').insert(data_dict).execute()
 
-            res = supabase.table('pets').insert(data_dict).select().execute()
-            if res.data: return res.data[0]['id']
+            # 檢查是否有回傳資料
+            if res.data: 
+                return res.data[0]['id']
             return None
         
     except Exception as e:
         # 將錯誤印在螢幕上，方便除錯
         st.error(f"儲存失敗！錯誤訊息：{str(e)}")
-        # 同時印在 Console 裡
-        print(f"Save Pet Error: {e}")
         return None
 
 def fetch_pets():
