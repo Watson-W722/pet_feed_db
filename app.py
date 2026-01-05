@@ -74,15 +74,30 @@ def pil_image_to_base64(image):
         return None
 
 def save_pet(data_dict, pet_id=None):
-    if pet_id:
-        supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
-        return pet_id
-    else:
-        # 新增後回傳新 ID
-        res = supabase.table('pets').insert(data_dict).select().execute()
-        if res.data: return res.data[0]['id']
+    try:
+        # 清除快取 (這行一定要在 return 之前執行)
+        st.cache_data.clear()
+            
+        if pet_id:
+            # 更新現有資料
+            supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
+            return pet_id
+        else:
+            # 新增資料
+            # 確保 image_data 如果是 None 不會造成問題 (通常 Supabase 接受 null，但為了保險)
+            if 'image_data' in data_dict and data_dict['image_data'] is None:
+                del data_dict['image_data'] # 移除該鍵，讓資料庫用預設值或 NULL
+
+            res = supabase.table('pets').insert(data_dict).select().execute()
+            if res.data: return res.data[0]['id']
+            return None
+        
+    except Exception as e:
+        # 將錯誤印在螢幕上，方便除錯
+        st.error(f"儲存失敗！錯誤訊息：{str(e)}")
+        # 同時印在 Console 裡
+        print(f"Save Pet Error: {e}")
         return None
-    st.cache_data.clear()
 
 def fetch_pets():
     try:
