@@ -42,7 +42,6 @@ HEALTH_OPTIONS = ["健康", "腎貓", "胰貓", "糖貓", "其它"]
 
 # 初始化 Session State
 if 'expand_edit' not in st.session_state: st.session_state.expand_edit = False
-if 'show_crop_dialog' not in st.session_state: st.session_state.show_crop_dialog = False # 控制彈出視窗
 
 # ==========================================
 # 2. 資料庫連線
@@ -73,28 +72,26 @@ def pil_image_to_base64(image):
     except Exception as e:
         return None
 
+# [關鍵修正] 移除 .select()，並將 cache clear 移至最前
 def save_pet(data_dict, pet_id=None):
     try:
-        # 清除快取 (這行一定要在 return 之前執行)
-        st.cache_data.clear()
-            
+        st.cache_data.clear() # 先清快取
+        
         if pet_id:
-            # 更新現有資料
             supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
             return pet_id
         else:
-            # 新增資料
-            # [修正 2] 移除 .select()，直接 .execute() 即可
+            # 移除 image_data 若為 None (避免報錯)
+            if 'image_data' in data_dict and data_dict['image_data'] is None:
+                del data_dict['image_data']
+                
+            # [修正] 移除 .select()
             res = supabase.table('pets').insert(data_dict).execute()
-
-            # 檢查是否有回傳資料
-            if res.data: 
+            if res.data:
                 return res.data[0]['id']
             return None
-        
     except Exception as e:
-        # 將錯誤印在螢幕上，方便除錯
-        st.error(f"儲存失敗！錯誤訊息：{str(e)}")
+        st.error(f"儲存失敗: {str(e)}")
         return None
 
 def fetch_pets():
@@ -224,7 +221,6 @@ def get_last_meal_density(pet_id):
 # 4. 畫面渲染函式 (UI Components)
 # ==========================================
 
-# 彈出式裁切視窗
 @st.dialog("📷 更換大頭照")
 def open_crop_dialog(pet_id):
     st.write("請上傳圖片並選取範圍：")
@@ -262,29 +258,28 @@ def render_sidebar():
     pet_map = {}
 
     if not df_pets.empty:
+        # 過濾空白名字
         existing_names = [n for n in df_pets['name'].tolist() if n and n.strip()]
         pet_names = existing_names + ["➕ 新增寵物"]
         for _, row in df_pets.iterrows():
-            pet_map[row['name']] = row.to_dict()
+            if row['name'] and row['name'].strip():
+                pet_map[row['name']] = row.to_dict()
     
     selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
     current_pet_data = {}
 
-    # --- A. 顯示寵物資訊 (修改判斷邏輯) ---
-    # 修正重點：必須有選名字、名字不是"新增"、且名字不是空白字串
+    # --- A. 顯示寵物資訊 ---
     is_valid_pet = selected_pet_name and selected_pet_name != "➕ 新增寵物" and selected_pet_name.strip() != ""
-
+    
     if is_valid_pet:
-        current_pet_data = pet_map.get(selected_pet_name,{}) # 加個 get 避免報錯
- 
-        # 顯示圖片
+        current_pet_data = pet_map.get(selected_pet_name, {})
+
         if current_pet_data.get('image_data'):
             try:
                 img_src = f"data:image/jpeg;base64,{current_pet_data['image_data']}"
                 st.sidebar.image(img_src, width=150, caption=selected_pet_name)
             except: pass
         
-        # [修改] 按鈕只在這裡出現
         if st.sidebar.button("📷 更換大頭照", use_container_width=True):
             open_crop_dialog(current_pet_data['id'])
 
@@ -304,12 +299,11 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- B. 編輯/新增區塊 (統一介面，照片上傳移至 Dialog) ---
+    # --- B. 編輯/新增區塊 ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯基本資料"
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
     
     with st.sidebar.expander(expander_title, expanded=is_expanded):
-        # 統一使用 form，體驗較好
         with st.form("pet_basic_info"):
             p_name = st.text_input("姓名", value=current_pet_data.get('name', ''))
 
@@ -329,10 +323,10 @@ def render_sidebar():
             p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
             p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
             
-            # [修改] 這裡只處理文字儲存，不放圖片裁切
             btn_text = "💾 建立新寵物" if selected_pet_name == "➕ 新增寵物" else "💾 儲存修改"
+            
             if st.form_submit_button(btn_text):
-                if not p_name or not p_names.strip(): # 這裡也加強防呆，防止存入空白名字
+                if not p_name or not p_name.strip():
                     st.error("請輸入名字！")
                 else:
                     pet_payload = {
@@ -343,7 +337,7 @@ def render_sidebar():
                         "weight": p_weight,
                         "health_tags": p_tags,
                         "health_desc": p_desc,
-                        "image_data": current_pet_data.get('image_data') # 繼承舊圖
+                        "image_data": current_pet_data.get('image_data') 
                     }
 
                     if selected_pet_name != "➕ 新增寵物":
@@ -353,17 +347,15 @@ def render_sidebar():
                         time.sleep(1)
                         st.rerun()
                     else:
-                        new_id = save_pet(pet_payload) # 這裡會拿到新 ID
+                        new_id = save_pet(pet_payload)
                         st.toast("✅ 新寵物建立成功！")
-                        # 建立成功後，自動設定旗標，準備跳出更換照片視窗
                         if new_id:
-                            # 雖然這裡無法直接打開 Dialog (Streamlit限制)，但我們引導使用者去按按鈕
                             st.info("請點擊上方的「📷 更換大頭照」來上傳照片！")
                         time.sleep(1)
                         st.rerun()
 
-    # === C. 刪除區塊 ===
-    if is_valid_pet: # 使用同樣的嚴格判斷
+    # === C. 刪除區塊 ---
+    if is_valid_pet:
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
             has_data = check_pet_has_data(current_pet_data['id'])
