@@ -297,33 +297,33 @@ def open_crop_dialog(pet_id):
             st.rerun()
 
 def render_sidebar():
-    # 顯示目前登入者
-    st.sidebar.markdown(f"👋 **{st.session_state.user_id}**")
+    st.sidebar.title(f"👋 Hi, {st.session_state.user_id}")
+    
     if st.sidebar.button("登出", type="secondary", use_container_width=True):
         st.session_state.user_id = None
         st.rerun()
     
     st.sidebar.divider()
-    st.sidebar.title("🐾 寵物管理")
+    st.sidebar.subheader("🐾 寵物管理")
 
     df_pets = fetch_pets()
     
-    # [修正] 下拉選單邏輯：多隻寵物時顯示「請選擇」
+    # [修正] 下拉選單邏輯
     pet_names = []
     pet_map = {}
     
     if not df_pets.empty:
+        # 過濾空白名字
         valid_pets = [row for _, row in df_pets.iterrows() if row['name'] and row['name'].strip()]
         
-        # 如果大於 1 隻，插入「請選擇...」
         if len(valid_pets) > 1:
-            pet_names.append("請選擇...") 
+            pet_names.append("請選擇...") # 多隻才顯示
             
         for row in valid_pets:
             pet_names.append(row['name'])
             pet_map[row['name']] = row.to_dict()
             
-    pet_names.append("➕ 新增寵物")
+    pet_names.append("➕ 新增寵物") # 最後才加新增選項
     
     selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
     current_pet_data = {}
@@ -345,9 +345,7 @@ def render_sidebar():
 
         age_str = calculate_age(current_pet_data.get('birth_date'))
         tags = current_pet_data.get('health_tags') or []
-        desc = current_pet_data.get('health_desc') or ""
         status_text = ", ".join(tags)
-        if desc: status_text += f" ({desc})"
         if not status_text: status_text = "未設定"
 
         st.sidebar.markdown(f"""
@@ -363,7 +361,7 @@ def render_sidebar():
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯基本資料"
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
     
-    # 只有在選了「新增」或「有效寵物」時才顯示編輯區 (避免在「請選擇」時顯示)
+    # [修正] 如果選的是 "請選擇..."，則不顯示編輯區塊
     if selected_pet_name != "請選擇...":
         with st.sidebar.expander(expander_title, expanded=is_expanded):
             with st.form("pet_basic_info"):
@@ -414,11 +412,11 @@ def render_sidebar():
                             new_id = save_pet(pet_payload)
                             st.toast("✅ 新寵物建立成功！")
                             if new_id:
-                                # 自動重新整理，讓使用者可以去換照片
-                                time.sleep(1)
-                                st.rerun()
+                                st.info("請點擊上方的「📷 更換大頭照」來上傳照片！")
+                            time.sleep(1)
+                            st.rerun()
 
-    # === 刪除區塊 ===
+    # === C. 刪除區塊 ---
     if is_valid_pet:
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
@@ -445,6 +443,7 @@ def render_sidebar():
                         time.sleep(1)
                         st.rerun()
     
+    # 回傳目前選擇的寵物資料 (如果是 '請選擇' 或 '新增' 則回傳 None 或空字典)
     if is_valid_pet:
         return current_pet_data
     return None
@@ -702,6 +701,7 @@ def main_app():
             sel_cat_dis = st.selectbox("篩選類別", cat_opts)
             sel_cat_code = next((k for k, v in CATEGORY_MAP.items() if v == sel_cat_dis), sel_cat_dis)
             
+            # 篩選類別
             df_view = df_all[df_all['category'] == sel_cat_code].copy()
             df_view['selected'] = df_view['id'].isin(my_ids)
             
