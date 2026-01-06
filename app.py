@@ -40,10 +40,8 @@ CATEGORY_REVERSE = {v: k for k, v in CATEGORY_MAP.items()}
 FOOD_CATEGORIES_CODE = ["wet_food", "dry_food", "snack", "other"]
 HEALTH_OPTIONS = ["健康", "腎貓", "胰貓", "糖貓", "其它"]
 
-# 初始化 Session State
 if 'expand_edit' not in st.session_state: st.session_state.expand_edit = False
-
-# 新增 用戶 ID 狀態
+# [新增] 用戶 ID 狀態
 if 'user_id' not in st.session_state: st.session_state.user_id = None
 
 # ==========================================
@@ -62,7 +60,7 @@ def init_supabase() -> Client:
 supabase = init_supabase()
 
 # ==========================================
-# 3. 資料操作函式（需加入 user_id 篩選）
+# 3. 資料操作函式
 # ==========================================
 
 def pil_image_to_base64(image):
@@ -75,35 +73,40 @@ def pil_image_to_base64(image):
     except Exception as e:
         return None
 
-# [關鍵修正] 移除 .select()，並將 cache clear 移至最前
 def save_pet(data_dict, pet_id=None):
     # 自動補上 user_id
     data_dict['user_id'] = st.session_state.user_id
     
-    if pet_id:
-        supabase.table('pet').update(data_dict).eq('id', pet_id).execute()
-        return pet_id
-    else:
-        res = supabase.table('pet').insert(data_dict).select().execute()
-        if res.data: return res.data[0]['id']
+    try:
+        st.cache_data.clear()
+        if pet_id:
+            supabase.table('pets').update(data_dict).eq('id', pet_id).execute()
+            return pet_id
+        else:
+            if 'image_data' in data_dict and data_dict['image_data'] is None:
+                del data_dict['image_data']
+            res = supabase.table('pets').insert(data_dict).select().execute()
+            if res.data: return res.data[0]['id']
+            return None
+    except Exception as e:
+        st.error(f"儲存失敗: {e}")
         return None
-    st.cache_data.clear()
 
-def fetch_pet():
+def fetch_pets():
     try:
         user = st.session_state.user_id
-        # [修改] 只抓取目前登入使用者寵物
-        response = supabase.table('pet').select("*")\
+        # [修改] 只抓取目前登入使用者的寵物
+        response = supabase.table('pets').select("*")\
             .neq('is_deleted', True)\
             .eq('user_id', user)\
             .order('created_at').execute()
         return pd.DataFrame(response.data)
     except Exception as e:
-        return pd.DataFrame()
+        return pd.DataFrame()      
 
 def check_pet_has_data(pet_id):
     try:
-        res_menu = supabase.table('pet_food_relations').select("id", count='exact').eq('pet_id', pet_id).execute()
+        res_menu = supabase.table('pet_food_relations').select("id", count='exact').eq('pet_id', pet_id).execute() 
         count_menu = res_menu.count if res_menu.count is not None else len(res_menu.data)
         res_logs = supabase.table('diet_logs').select("id", count='exact').eq('pet_id', pet_id).execute()
         count_logs = res_logs.count if res_logs.count is not None else len(res_logs.data)
@@ -117,7 +120,7 @@ def soft_delete_pet(pet_id, reason):
         return True
     except: return False
 
-def hard_delete_pet(ped_id):
+def hard_delete_pet(pet_id):
     try:
         supabase.table('pets').delete().eq('id', pet_id).execute()
         st.cache_data.clear()
@@ -138,7 +141,7 @@ def calculate_age(birth_date_str):
 
 def add_new_food_to_library_and_menu(food_data, pet_id):
     try:
-        # 新增食物到 Global Library (大家共用，所以不綁 user_id，或者您可以選擇綁定)
+        # 新增食物到 Global Library
         res = supabase.table('food_library').insert(food_data).execute()
         if res.data:
             new_food_id = res.data[0]['id']
@@ -159,12 +162,13 @@ def fetch_pet_menu(pet_id):
         return pd.DataFrame(data)
     except: return pd.DataFrame()
 
+# [新增] 取得使用者所有寵物的常用食物 ID 列表 (智慧點餐本用)
 def get_user_common_food_ids(user_id):
     try:
         # 1. 找出該使用者所有的寵物 ID
         pets_res = supabase.table('pets').select('id').eq('user_id', user_id).execute()
         pet_ids = [p['id'] for p in pets_res.data]
-
+        
         if not pet_ids: return []
 
         # 2. 找出這些寵物有點過的所有 food_id
@@ -176,6 +180,7 @@ def get_user_common_food_ids(user_id):
 
 def save_log_entry(entries):
     try:
+        # 補上 user_id
         for e in entries:
             e['user_id'] = st.session_state.user_id
         supabase.table('diet_logs').insert(entries).execute()
@@ -240,20 +245,24 @@ def get_last_meal_density(pet_id):
 # 4. 畫面渲染函式 (UI Components)
 # ==========================================
 
-# 簡單登入頁面
+# [新增] 簡單登入頁面
 def login_page():
-    c1, c2, c3 = st.columns([1,2,1])
+    # 建立三欄，讓內容置中
+    c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        try: st.image("logo.png", width=100)
+        try: st.image("logo.png", width=150)
         except: st.header("🐱")
+        
         st.title("歡迎使用寵物飲食紀錄")
-
+        st.markdown("請輸入您的使用者名稱 (ID) 以開始使用。")
+        
         with st.form("login_form"):
-            Username = st.text_input("請輸入使用者名稱 (ID)", placeholder="例如：watson")
-            submitted = st.text_input_button("登入 / 開始使用", type="primary")
-
+            username = st.text_input("使用者名稱", placeholder="例如：watson")
+            submitted = st.form_submit_button("🚀 登入 / 開始", type="primary")
+            
             if submitted:
-                if Username.strip():
+                if username.strip():
+                    st.session_state.user_id = username.strip()
                     st.rerun()
                 else:
                     st.error("請輸入名稱")
@@ -288,48 +297,48 @@ def open_crop_dialog(pet_id):
             st.rerun()
 
 def render_sidebar():
-    st.sidebar.title(f"👋 Hi, {st.session_state.user_id}")
-
-    if st.sidebar.button("登出", type="secondary"):
+    # 顯示目前登入者
+    st.sidebar.markdown(f"👋 **{st.session_state.user_id}**")
+    if st.sidebar.button("登出", type="secondary", use_container_width=True):
         st.session_state.user_id = None
         st.rerun()
-
+    
     st.sidebar.divider()
-    st.sidebar.subheader("🐾 寵物管理")
+    st.sidebar.title("🐾 寵物管理")
 
     df_pets = fetch_pets()
-
-    # [修正] 下拉選單邏輯
+    
+    # [修正] 下拉選單邏輯：多隻寵物時顯示「請選擇」
     pet_names = []
     pet_map = {}
-
+    
     if not df_pets.empty:
-        # 過濾空白名字
-        valid_pets = [row for _, row in df_pets.iterrows() if row ['name'] and row['name'].strip()]
+        valid_pets = [row for _, row in df_pets.iterrows() if row['name'] and row['name'].strip()]
+        
+        # 如果大於 1 隻，插入「請選擇...」
         if len(valid_pets) > 1:
-            pet_names("請選擇...") # 多隻才顯示
-
+            pet_names.append("請選擇...") 
+            
         for row in valid_pets:
             pet_names.append(row['name'])
             pet_map[row['name']] = row.to_dict()
+            
+    pet_names.append("➕ 新增寵物")
+    
+    selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
+    current_pet_data = {}
 
-        pet_names.append("➕ 新增寵物") # 最後才加新增選項
-        selected_pet_name = st.sidebar.selectbox("選擇寵物", pet_names)
-        current_pet_data = {}
+    # 判斷是否選中了有效寵物
+    is_valid_pet = selected_pet_name not in ["➕ 新增寵物", "請選擇..."]
+    
+    if is_valid_pet:
+        current_pet_data = pet_map.get(selected_pet_name, {})
 
-        # 判斷是否選中了有效寵物
-        # --- A. 顯示寵物資訊 ---
-        is_valid_pet = selected_pet_name not in ["➕ 新增寵物", "請選擇..."]
-
-        if is_valid_pet:
-            current_pet_data = pet_map.get(selected_pet_name, {})
-
-            if current_pet_data.get('image_data'):
-                try:
-                    img_src = f"data:image/jpeg;base64, {current_pet_data['image_data']}"
-                    st.sidebar.image(img_src, width=100, caption=selected_pet_name)
-                except: pass
-
+        if current_pet_data.get('image_data'):
+            try:
+                img_src = f"data:image/jpeg;base64,{current_pet_data['image_data']}"
+                st.sidebar.image(img_src, width=150, caption=selected_pet_name)
+            except: pass
         
         if st.sidebar.button("📷 更換大頭照", use_container_width=True):
             open_crop_dialog(current_pet_data['id'])
@@ -350,11 +359,11 @@ def render_sidebar():
         """)
         st.sidebar.divider()
 
-    # --- B. 編輯/新增區塊 ---
+    # --- 編輯/新增區塊 ---
     expander_title = "新增資料" if selected_pet_name == "➕ 新增寵物" else "編輯基本資料"
     is_expanded = (selected_pet_name == "➕ 新增寵物") or st.session_state.expand_edit
-
-    # [修正] 如果選的是 "請選擇..."，則不顯示編輯區塊
+    
+    # 只有在選了「新增」或「有效寵物」時才顯示編輯區 (避免在「請選擇」時顯示)
     if selected_pet_name != "請選擇...":
         with st.sidebar.expander(expander_title, expanded=is_expanded):
             with st.form("pet_basic_info"):
@@ -376,8 +385,10 @@ def render_sidebar():
                 p_tags = st.multiselect("健康狀況", HEALTH_OPTIONS, default=valid_defaults)
                 p_desc = st.text_input("備註 / 其它說明", value=current_pet_data.get('health_desc', ""))
                 
+                # [修正] 移除圖片上傳區塊，解決閃爍問題
+                
                 btn_text = "💾 建立新寵物" if selected_pet_name == "➕ 新增寵物" else "💾 儲存修改"
-            
+                
                 if st.form_submit_button(btn_text):
                     if not p_name or not p_name.strip():
                         st.error("請輸入名字！")
@@ -393,21 +404,21 @@ def render_sidebar():
                             "image_data": current_pet_data.get('image_data') 
                         }
 
-                    if selected_pet_name != "➕ 新增寵物":
-                        save_pet(pet_payload, current_pet_data['id'])
-                        st.toast("資料已更新!")
-                        st.session_state.expand_edit = False
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        new_id = save_pet(pet_payload)
-                        st.toast("✅ 新寵物建立成功！")
-                        if new_id:
-                            st.info("請點擊上方的「📷 更換大頭照」來上傳照片！")
-                        time.sleep(1)
-                        st.rerun()
+                        if selected_pet_name != "➕ 新增寵物":
+                            save_pet(pet_payload, current_pet_data['id'])
+                            st.toast("資料已更新!")
+                            st.session_state.expand_edit = False
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            new_id = save_pet(pet_payload)
+                            st.toast("✅ 新寵物建立成功！")
+                            if new_id:
+                                # 自動重新整理，讓使用者可以去換照片
+                                time.sleep(1)
+                                st.rerun()
 
-    # === C. 刪除區塊 ---
+    # === 刪除區塊 ===
     if is_valid_pet:
         st.sidebar.markdown("---")
         with st.sidebar.expander("🗑️ 刪除", expanded=False):
@@ -433,8 +444,7 @@ def render_sidebar():
                         st.toast(f"已刪除 {selected_pet_name}")
                         time.sleep(1)
                         st.rerun()
-
-    # 回傳目前選擇的寵物資料 (如果是 '請選擇' 或 '新增' 則回傳 None 或空字典)
+    
     if is_valid_pet:
         return current_pet_data
     return None
@@ -446,13 +456,19 @@ def main_app():
     current_pet = render_sidebar()
 
     if not current_pet:
-        st.info("👈 請先在側邊欄新增寵物資料，才能開始使用喔！")
+        st.info("👈 請先在側邊欄選擇或新增寵物")
+        
         col1, col2 = st.columns([0.5, 4])
         with col1:
             try: st.image("logo.png", width=80)
             except: st.header("🐱")
         with col2:
             st.title("歡迎使用寵物飲食紀錄")
+        
+        # 顯示歡迎與指引
+        st.write("---")
+        st.markdown(f"### 👋 Hi, {st.session_state.user_id}")
+        st.write("請從左側選單選擇一位主子，或是點擊「➕ 新增寵物」來建立新資料。")
         st.stop()
     
     pet_id = current_pet['id']
@@ -677,10 +693,8 @@ def main_app():
                 my_ids = [x['food_id'] for x in res_my.data]
             except: my_ids = []
 
-            # [修正] 取得使用者「其他寵物」常用的食物 ID
+            # [修正] 取得使用者「其他寵物」常用的食物 ID (智慧排序)
             common_food_ids = get_user_common_food_ids(st.session_state.user_id)
-
-            # 在資料表增加一欄：是否為常用食物
             df_all['is_common'] = df_all['id'].isin(common_food_ids)
 
             cats = df_all['category'].unique()
@@ -690,25 +704,24 @@ def main_app():
             
             df_view = df_all[df_all['category'] == sel_cat_code].copy()
             df_view['selected'] = df_view['id'].isin(my_ids)
-
-            # [修正] 排序：已選擇 > 常用(其他寵物) > 其他
-            df_view = df_view.sort_values(by=['selectd', 'is_common'], ascending=[False, False])
-
-            # 在顯示時標記常用食物
+            
+            # 排序：已選 > 常用 > 其他
+            df_view = df_view.sort_values(by=['selected', 'is_common'], ascending=[False, False])
+            
+            # 顯示標記
             def mark_name(row):
                 prefix = "🌟 " if row['is_common'] else ""
                 return f"{prefix}{row['name']}"
-            
             df_view['display_name'] = df_view.apply(mark_name, axis=1)
-            
+
             edited = st.data_editor(
-                df_view[['selected', 'brand', 'name', 'calories_100g', 'id']], # 顯示 ID 以便後續查找
+                df_view[['selected', 'brand', 'display_name', 'calories_100g', 'id']],
                 column_config={
                     "selected": st.column_config.CheckboxColumn("加入", default=False),
                     "brand": "品牌",
-                    "display_name": "品名 (🌟代表常用)",
+                    "display_name": "品名 (🌟常用)",
                     "calories_100g": "熱量/100g",
-                    "id": None # 隱藏 ID
+                    "id": None
                 },
                 disabled=["brand", "display_name", "calories_100g"],
                 use_container_width=True, key="menu_edit"
@@ -740,12 +753,11 @@ def main_app():
                 st.download_button("⬇️ 下載 CSV", csv, f"{pet_name}_record.csv", "text/csv")
             else: st.info("無資料")
 
-
 def main():
     if not supabase:
         st.error("無法連線到資料庫")
         st.stop()
-
+        
     if not st.session_state.user_id:
         login_page()
     else:
