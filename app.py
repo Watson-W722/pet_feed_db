@@ -703,7 +703,8 @@ def main_app():
             
             edited = st.data_editor(
                 df_view[['selected', 'brand', 'name', 'calories_100g', 'id']], # 顯示 ID 以便後續查找
-                column_config={"selected": st.column_config.CheckboxColumn("加入", default=False)
+                column_config={
+                    "selected": st.column_config.CheckboxColumn("加入", default=False),
                     "brand": "品牌",
                     "display_name": "品名 (🌟代表常用)",
                     "calories_100g": "熱量/100g",
