@@ -288,7 +288,7 @@ def open_crop_dialog(pet_id):
             st.rerun()
 
 def render_sidebar():
-    st.sidebar.title(f"👋 Hi, {st.session_state.user_id)}")
+    st.sidebar.title(f"👋 Hi, {st.session_state.user_id}")
 
     if st.sidebar.button("登出", type="secondary"):
         st.session_state.user_id = None
